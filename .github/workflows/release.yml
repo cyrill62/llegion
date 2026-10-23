@@ -1,0 +1,62 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.targets }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, targets: linux-x64 }
+          - { os: ubuntu-24.04-arm, targets: linux-arm64 }
+          # Built inside rust:alpine (musl host), see the "Build (musl)" step.
+          - { os: ubuntu-latest, targets: linux-musl-x64, alpine: true }
+          - { os: ubuntu-24.04-arm, targets: linux-musl-arm64, alpine: true }
+          # Both macOS architectures + a universal .app bundle.
+          - { os: macos-latest, targets: macos }
+          - { os: windows-latest, targets: windows-x64 }
+          - { os: windows-11-arm, targets: windows-arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        if: ${{ !matrix.alpine }}
+      - uses: Swatinem/rust-cache@v2
+        if: ${{ !matrix.alpine }}
+        with:
+          key: ${{ matrix.targets }}
+      - name: Linux GUI dependencies
+        if: runner.os == 'Linux' && !matrix.alpine
+        run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
+      - name: LLVM (ring needs clang on Windows ARM64)
+        if: matrix.targets == 'windows-arm64'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command clang -ErrorAction SilentlyContinue)) { choco install llvm -y --no-progress }
+          "C:\Program Files\LLVM\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+      - name: Build (Linux / macOS)
+        if: runner.os != 'Windows' && !matrix.alpine
+        run: ./scripts/build.sh ${{ matrix.targets }}
+      # Docker run rather than a job container: JS actions don't run in Alpine on arm64 runners.
+      - name: Build (musl)
+        if: matrix.alpine
+        run: >-
+          docker run --rm -v "$PWD:/src" -w /src rust:alpine
+          sh -c 'apk add --no-cache bash build-base && ./scripts/build.sh ${{ matrix.targets }}'
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/build.ps1 ${{ matrix.targets }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+          draft: true

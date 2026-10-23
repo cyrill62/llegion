@@ -1,0 +1,504 @@
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+use crate::gpu::{GpuInfo, GpuKind, Vendor};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+#[derive(Default)]
+pub struct Settings {
+    pub connection: Connection,
+    pub server: ServerSettings,
+    pub gpu: GpuSettings,
+    pub proxy: ProxySettings,
+    pub logs: LogSettings,
+    pub ui: UiSettings,
+}
+
+/// How this app talks to the Ollama API (can be a remote, token-protected server).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct Connection {
+    pub base_url: String,
+    pub api_token: String,
+    pub accept_invalid_certs: bool,
+}
+
+impl Default for Connection {
+    fn default() -> Self {
+        Self {
+            base_url: "http://127.0.0.1:11434".into(),
+            api_token: String::new(),
+            accept_invalid_certs: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ServerSettings {
+    /// When true the app launches `ollama serve` itself and owns its logs.
+    pub manage_server: bool,
+    pub auto_start: bool,
+    pub stop_on_exit: bool,
+    /// Restart `ollama serve` if it crashes (at most 3 times per minute).
+    pub restart_on_crash: bool,
+    pub ollama_path: String,
+    pub host: String,
+    pub port: u16,
+    /// 0 = let the server decide.
+    pub context_length: u32,
+    pub keep_alive: String,
+    pub max_loaded_models: u32,
+    pub num_parallel: u32,
+    pub max_queue: u32,
+    pub flash_attention: bool,
+    pub kv_cache_type: String,
+    pub models_dir: String,
+    pub origins: String,
+    pub debug_logging: bool,
+    /// Extra `KEY=VALUE` lines passed verbatim to the server.
+    pub extra_env: String,
+}
+
+impl Default for ServerSettings {
+    fn default() -> Self {
+        Self {
+            manage_server: false,
+            auto_start: false,
+            stop_on_exit: true,
+            restart_on_crash: true,
+            ollama_path: "ollama".into(),
+            host: "127.0.0.1".into(),
+            port: 11434,
+            context_length: 0,
+            keep_alive: "5m".into(),
+            max_loaded_models: 0,
+            num_parallel: 0,
+            max_queue: 0,
+            flash_attention: false,
+            kv_cache_type: "f16".into(),
+            models_dir: String::new(),
+            origins: String::new(),
+            debug_logging: false,
+            extra_env: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum GpuMode {
+    Auto,
+    CpuOnly,
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct GpuSettings {
+    pub mode: GpuMode,
+    pub disable_igpu: bool,
+    /// Device keys (see `GpuInfo::key`) explicitly disabled in Custom mode.
+    pub disabled_devices: Vec<String>,
+    /// Enables Ollama's Vulkan backend (needed for Intel iGPUs / Arc).
+    pub enable_vulkan: bool,
+}
+
+impl Default for GpuSettings {
+    fn default() -> Self {
+        Self {
+            mode: GpuMode::Auto,
+            disable_igpu: true,
+            disabled_devices: Vec::new(),
+            enable_vulkan: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TlsMode {
+    /// Plain HTTP (token still enforced).
+    Off,
+    /// Caddy's internal CA (self-signed, good for LAN).
+    Internal,
+    /// Let's Encrypt / ZeroSSL via ACME — needs a public domain.
+    Acme,
+    /// User-provided certificate and key files.
+    Custom,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct ProxySettings {
+    pub enabled: bool,
+    pub auto_start: bool,
+    pub caddy_path: String,
+    pub listen_host: String,
+    pub port: u16,
+    pub domain: String,
+    pub tls: TlsMode,
+    pub acme_email: String,
+    pub cert_path: String,
+    pub key_path: String,
+    pub require_token: bool,
+    pub tokens: Vec<ApiToken>,
+    pub cors_origin: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ApiToken {
+    pub label: String,
+    pub token: String,
+}
+
+impl Default for ProxySettings {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            auto_start: false,
+            caddy_path: "caddy".into(),
+            listen_host: "0.0.0.0".into(),
+            port: 8443,
+            domain: "localhost".into(),
+            tls: TlsMode::Internal,
+            acme_email: String::new(),
+            cert_path: String::new(),
+            key_path: String::new(),
+            require_token: true,
+            tokens: Vec::new(),
+            cors_origin: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum LogSource {
+    /// stdout/stderr of the server started by this app.
+    Managed,
+    /// Tail a log file (default: the official app's server.log).
+    File,
+    /// `journalctl -u ollama -f` (Linux systemd installs).
+    Journal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct LogSettings {
+    pub source: LogSource,
+    pub file_path: String,
+    pub journal_unit: String,
+    pub max_lines: usize,
+}
+
+impl Default for LogSettings {
+    fn default() -> Self {
+        Self {
+            source: if cfg!(target_os = "linux") {
+                LogSource::Journal
+            } else {
+                LogSource::File
+            },
+            file_path: default_log_file()
+                .map(|p| p.display().to_string())
+                .unwrap_or_default(),
+            journal_unit: "ollama".into(),
+            max_lines: 20_000,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
+pub struct UiSettings {
+    pub dark_mode: bool,
+    /// Interface zoom (1.0 = 100 %).
+    pub scale: f32,
+    pub poll_interval_ms: u64,
+    pub history_seconds: u64,
+}
+
+impl Default for UiSettings {
+    fn default() -> Self {
+        Self {
+            dark_mode: true,
+            scale: 1.25,
+            poll_interval_ms: 1000,
+            history_seconds: 300,
+        }
+    }
+}
+
+/// Where the official Ollama desktop app writes its server log.
+pub fn default_log_file() -> Option<PathBuf> {
+    let base = directories::BaseDirs::new()?;
+    if cfg!(windows) {
+        Some(base.data_local_dir().join("Ollama").join("server.log"))
+    } else {
+        Some(
+            base.home_dir()
+                .join(".ollama")
+                .join("logs")
+                .join("server.log"),
+        )
+    }
+}
+
+pub fn config_dir() -> PathBuf {
+    directories::ProjectDirs::from("", "", "ollama-egui")
+        .map(|d| d.config_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn config_file() -> PathBuf {
+    config_dir().join("settings.toml")
+}
+
+impl Settings {
+    pub fn load() -> Self {
+        std::fs::read_to_string(config_file())
+            .ok()
+            .and_then(|s| toml::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self) -> anyhow::Result<PathBuf> {
+        let path = config_file();
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+        std::fs::write(&path, toml::to_string_pretty(self)?)?;
+        restrict_permissions(&path);
+        Ok(path)
+    }
+
+    /// Address the Ollama server binds to. Forced to loopback when the proxy fronts it,
+    /// so the token check cannot be bypassed by hitting the raw port.
+    pub fn effective_bind_host(&self) -> String {
+        if self.proxy.enabled {
+            "127.0.0.1".into()
+        } else {
+            self.server.host.clone()
+        }
+    }
+
+    pub fn upstream_addr(&self) -> String {
+        format!("127.0.0.1:{}", self.server.port)
+    }
+
+    /// Environment variables for `ollama serve` derived from the settings.
+    pub fn ollama_env(&self, gpus: &[GpuInfo]) -> Vec<(String, String)> {
+        let s = &self.server;
+        let mut env = vec![(
+            "OLLAMA_HOST".to_string(),
+            format!("{}:{}", self.effective_bind_host(), s.port),
+        )];
+        let mut push = |k: &str, v: String| env.push((k.to_string(), v));
+
+        if s.context_length > 0 {
+            push("OLLAMA_CONTEXT_LENGTH", s.context_length.to_string());
+        }
+        if !s.keep_alive.trim().is_empty() {
+            push("OLLAMA_KEEP_ALIVE", s.keep_alive.trim().to_string());
+        }
+        if s.max_loaded_models > 0 {
+            push("OLLAMA_MAX_LOADED_MODELS", s.max_loaded_models.to_string());
+        }
+        if s.num_parallel > 0 {
+            push("OLLAMA_NUM_PARALLEL", s.num_parallel.to_string());
+        }
+        if s.max_queue > 0 {
+            push("OLLAMA_MAX_QUEUE", s.max_queue.to_string());
+        }
+        if s.flash_attention {
+            push("OLLAMA_FLASH_ATTENTION", "1".into());
+            if s.kv_cache_type != "f16" {
+                push("OLLAMA_KV_CACHE_TYPE", s.kv_cache_type.clone());
+            }
+        }
+        if !s.models_dir.trim().is_empty() {
+            push("OLLAMA_MODELS", s.models_dir.trim().to_string());
+        }
+        if !s.origins.trim().is_empty() {
+            push("OLLAMA_ORIGINS", s.origins.trim().to_string());
+        }
+        if s.debug_logging {
+            push("OLLAMA_DEBUG", "1".into());
+        }
+        env.extend(self.gpu_env(gpus));
+        for line in s.extra_env.lines() {
+            if let Some((k, v)) = line.split_once('=') {
+                let k = k.trim();
+                if !k.is_empty() && !k.starts_with('#') {
+                    env.push((k.to_string(), v.trim().to_string()));
+                }
+            }
+        }
+        env
+    }
+
+    pub fn is_gpu_enabled(&self, gpu: &GpuInfo) -> bool {
+        match self.gpu.mode {
+            GpuMode::CpuOnly => false,
+            GpuMode::Auto => !(self.gpu.disable_igpu && gpu.kind == GpuKind::Integrated),
+            GpuMode::Custom => {
+                !(self.gpu.disable_igpu && gpu.kind == GpuKind::Integrated)
+                    && !self.gpu.disabled_devices.contains(&gpu.key())
+            }
+        }
+    }
+
+    /// Translates the GPU selection into the visibility variables each backend honours.
+    pub fn gpu_env(&self, gpus: &[GpuInfo]) -> Vec<(String, String)> {
+        let mut env = Vec::new();
+        if self.gpu.mode == GpuMode::CpuOnly {
+            for k in [
+                "CUDA_VISIBLE_DEVICES",
+                "ROCR_VISIBLE_DEVICES",
+                "HIP_VISIBLE_DEVICES",
+                "GGML_VK_VISIBLE_DEVICES",
+            ] {
+                env.push((k.to_string(), "-1".to_string()));
+            }
+            return env;
+        }
+        if self.gpu.enable_vulkan {
+            env.push(("OLLAMA_VULKAN".into(), "1".into()));
+        }
+
+        let any_disabled = gpus.iter().any(|g| !self.is_gpu_enabled(g));
+        if !any_disabled {
+            return env;
+        }
+
+        let selection = |vendor: Vendor| -> Option<String> {
+            let devices: Vec<&GpuInfo> = gpus.iter().filter(|g| g.vendor == vendor).collect();
+            if devices.is_empty() || devices.iter().all(|g| self.is_gpu_enabled(g)) {
+                return None;
+            }
+            let ids: Vec<String> = devices
+                .iter()
+                .filter(|g| self.is_gpu_enabled(g))
+                .map(|g| g.backend_id.clone())
+                .collect();
+            Some(if ids.is_empty() {
+                "-1".into()
+            } else {
+                ids.join(",")
+            })
+        };
+        if let Some(v) = selection(Vendor::Nvidia) {
+            env.push(("CUDA_VISIBLE_DEVICES".into(), v));
+        }
+        if let Some(v) = selection(Vendor::Amd) {
+            env.push(("ROCR_VISIBLE_DEVICES".into(), v));
+        }
+        // Vulkan enumerates every adapter; indices follow detection order.
+        if self.gpu.enable_vulkan {
+            let ids: Vec<String> = gpus
+                .iter()
+                .enumerate()
+                .filter(|(_, g)| self.is_gpu_enabled(g) && g.vendor != Vendor::Apple)
+                .map(|(i, _)| i.to_string())
+                .collect();
+            env.push((
+                "GGML_VK_VISIBLE_DEVICES".into(),
+                if ids.is_empty() {
+                    "-1".into()
+                } else {
+                    ids.join(",")
+                },
+            ));
+        }
+        env
+    }
+}
+
+#[cfg(unix)]
+pub fn restrict_permissions(path: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    // The file holds API tokens; keep it private to the user.
+    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+}
+
+#[cfg(not(unix))]
+pub fn restrict_permissions(_path: &std::path::Path) {}
+
+/// Shell snippets to apply the same environment to an OS-managed Ollama service.
+pub fn service_env_snippet(env: &[(String, String)]) -> String {
+    if cfg!(windows) {
+        let mut out = String::from("# PowerShell — then quit and restart the Ollama tray app\n");
+        for (k, v) in env {
+            out.push_str(&format!(
+                "[Environment]::SetEnvironmentVariable(\"{k}\", \"{v}\", \"User\")\n"
+            ));
+        }
+        out
+    } else if cfg!(target_os = "macos") {
+        let mut out = String::from("# Terminal — then quit and restart the Ollama app\n");
+        for (k, v) in env {
+            out.push_str(&format!("launchctl setenv {k} \"{v}\"\n"));
+        }
+        out
+    } else {
+        let mut out = String::from(
+            "# sudo systemctl edit ollama.service  — paste below, then:\n# sudo systemctl daemon-reload && sudo systemctl restart ollama\n[Service]\n",
+        );
+        for (k, v) in env {
+            out.push_str(&format!("Environment=\"{k}={v}\"\n"));
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gpu::test_gpu;
+
+    fn env_map(env: &[(String, String)]) -> std::collections::HashMap<String, String> {
+        env.iter().cloned().collect()
+    }
+
+    #[test]
+    fn proxy_forces_loopback() {
+        let mut s = Settings::default();
+        s.server.host = "0.0.0.0".into();
+        s.server.context_length = 32768;
+        s.proxy.enabled = true;
+        let env = env_map(&s.ollama_env(&[]));
+        assert_eq!(env["OLLAMA_HOST"], "127.0.0.1:11434");
+        assert_eq!(env["OLLAMA_CONTEXT_LENGTH"], "32768");
+    }
+
+    #[test]
+    fn igpu_is_hidden() {
+        let s = Settings::default();
+        let gpus = [
+            test_gpu(Vendor::Amd, GpuKind::Discrete, "0"),
+            test_gpu(Vendor::Amd, GpuKind::Integrated, "1"),
+            test_gpu(Vendor::Nvidia, GpuKind::Discrete, "GPU-abc"),
+        ];
+        let env = env_map(&s.gpu_env(&gpus));
+        assert_eq!(env["ROCR_VISIBLE_DEVICES"], "0");
+        assert!(!env.contains_key("CUDA_VISIBLE_DEVICES"));
+    }
+
+    #[test]
+    fn cpu_only_hides_everything() {
+        let mut s = Settings::default();
+        s.gpu.mode = GpuMode::CpuOnly;
+        let env = env_map(&s.gpu_env(&[]));
+        assert_eq!(env["CUDA_VISIBLE_DEVICES"], "-1");
+        assert_eq!(env["ROCR_VISIBLE_DEVICES"], "-1");
+    }
+
+    #[test]
+    fn kv_cache_requires_flash_attention() {
+        let mut s = Settings::default();
+        s.server.kv_cache_type = "q8_0".into();
+        assert!(!env_map(&s.ollama_env(&[])).contains_key("OLLAMA_KV_CACHE_TYPE"));
+        s.server.flash_attention = true;
+        assert_eq!(env_map(&s.ollama_env(&[]))["OLLAMA_KV_CACHE_TYPE"], "q8_0");
+    }
+}
