@@ -2,8 +2,8 @@ use eframe::egui::{self, RichText};
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 
 use crate::app::App;
-use crate::backend::Sample;
-use crate::util::format_bytes;
+use crate::backend::{BenchRecord, Sample};
+use crate::util::{ctx_short, format_bytes};
 use crate::views::kit;
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
@@ -45,7 +45,7 @@ fn chart(
 impl App {
     pub fn performance_tab(&mut self, ui: &mut egui::Ui) {
         let (history, gpus, models, running, benchmarks, bench_running) = {
-            let s = self.backend.shared.lock().unwrap();
+            let s = self.ctl.backend.shared.lock().unwrap();
             (
                 s.history.iter().cloned().collect::<Vec<_>>(),
                 s.gpus.clone(),
@@ -224,11 +224,12 @@ impl App {
                         .clicked()
                     {
                         let ctx = (self.bench_ctx > 0).then_some(self.bench_ctx);
-                        self.backend.benchmark(
+                        self.ctl.backend.benchmark(
                             &self.bench_model,
                             &self.bench_prompt,
                             self.bench_tokens,
                             ctx,
+                            self.ctl.server_env(),
                         );
                     }
                     if bench_running {
@@ -236,7 +237,15 @@ impl App {
                         ui.label("Running…");
                     }
                     if let Some(r) = running.iter().find(|r| r.name == self.bench_model) {
-                        kit::badge(ui, format!("loaded · {}", r.processor()), crate::app::GREEN);
+                        let ctx = r
+                            .context_length
+                            .map(|c| format!(" · {} ctx", ctx_short(c)))
+                            .unwrap_or_default();
+                        kit::badge(
+                            ui,
+                            format!("loaded · {}{ctx}", r.processor()),
+                            crate::app::GREEN,
+                        );
                     }
                 });
             },
@@ -248,19 +257,21 @@ impl App {
                 "Results",
                 |ui| {
                     if ui.button("Clear results").clicked() {
-                        self.backend.shared.lock().unwrap().benchmarks.clear();
+                        self.ctl.backend.clear_benchmarks();
                     }
                 },
                 |ui| {
                     egui::Grid::new("bench_results")
                         .striped(true)
-                        .num_columns(8)
+                        .num_columns(10)
                         .spacing([28.0, 12.0])
                         .show(ui, |ui| {
                             for h in [
                                 "Time",
                                 "Model",
                                 "Context",
+                                "Processor",
+                                "Server",
                                 "Prompt tok/s",
                                 "Gen tok/s",
                                 "Tokens",
@@ -273,11 +284,23 @@ impl App {
                             for b in benchmarks.iter().rev() {
                                 ui.label(&b.when);
                                 ui.label(RichText::new(&b.model).monospace().strong());
+                                let requested = b
+                                    .num_ctx
+                                    .map(|c| c.to_string())
+                                    .unwrap_or_else(|| "auto".into());
                                 ui.label(
-                                    b.num_ctx
+                                    b.loaded_ctx
                                         .map(|c| c.to_string())
-                                        .unwrap_or_else(|| "auto".into()),
-                                );
+                                        .unwrap_or_else(|| requested.clone()),
+                                )
+                                .on_hover_text(format!(
+                                    "Requested: {requested}\nLoaded: {}",
+                                    b.loaded_ctx
+                                        .map(|c| c.to_string())
+                                        .unwrap_or_else(|| "unknown".into())
+                                ));
+                                ui.label(b.processor.as_deref().unwrap_or("-"));
+                                server_cell(ui, b);
                                 ui.label(format!("{:.1}", b.stats.prompt_tps()));
                                 ui.label(
                                     RichText::new(format!("{:.1}", b.stats.gen_tps()))
@@ -297,4 +320,15 @@ impl App {
             );
         }
     }
+}
+
+/// Compact summary of the server config a benchmark ran under; the full env on hover.
+fn server_cell(ui: &mut egui::Ui, b: &BenchRecord) {
+    let text = RichText::new(b.server_summary());
+    let text = if b.server_env.is_none() {
+        text.weak()
+    } else {
+        text
+    };
+    ui.label(text).on_hover_text(b.server_details());
 }

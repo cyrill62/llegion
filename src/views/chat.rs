@@ -1,9 +1,11 @@
 use std::time::Duration;
 
 use eframe::egui::{self, RichText};
+use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 
 use crate::app::{AMBER, App, GREEN, RED};
-use crate::backend::{ChatEntry, ChatOptions, Reply};
+use crate::backend::{ChatEntry, ChatOptions, Reply, preferred_model};
+use crate::chat_store::{ChatConfig, ChatSummary};
 use crate::ollama::LocalModel;
 use crate::views::kit;
 
@@ -44,38 +46,6 @@ fn model_menu(
     picked
 }
 
-fn stats_line(r: &Reply) -> Option<String> {
-    let ttft = r
-        .first_token
-        .map(|d| format!("first token {:.2}s", d.as_secs_f64()));
-    if let Some(st) = &r.stats {
-        let mut parts = vec![
-            format!("{:.1} tok/s", st.gen_tps()),
-            format!("{} tokens", st.eval_count),
-        ];
-        parts.extend(ttft);
-        parts.push(format!(
-            "prompt {} tokens at {:.0} tok/s",
-            st.prompt_eval_count,
-            st.prompt_tps()
-        ));
-        if st.load_duration > 50_000_000 {
-            parts.push(format!("load {:.2}s", st.load_duration as f64 / 1e9));
-        }
-        parts.push(format!("total {:.2}s", st.total_duration as f64 / 1e9));
-        return Some(parts.join(" · "));
-    }
-    let mut parts = Vec::new();
-    if let Some(tps) = r.live_tps() {
-        parts.push(format!("~{tps:.1} tok/s"));
-    }
-    if r.chunks > 0 {
-        parts.push(format!("{} tokens", r.chunks));
-    }
-    parts.extend(ttft);
-    (!parts.is_empty()).then(|| parts.join(" · "))
-}
-
 fn transcript(entries: &[ChatEntry]) -> String {
     entries
         .iter()
@@ -89,6 +59,20 @@ fn transcript(entries: &[ChatEntry]) -> String {
         .join("\n\n")
 }
 
+fn chat_groups(chats: &[ChatSummary], current: &str) -> Vec<String> {
+    let mut groups: Vec<_> = chats
+        .iter()
+        .map(|chat| chat.group.clone())
+        .filter(|group| !group.is_empty())
+        .collect();
+    if !current.is_empty() {
+        groups.push(current.to_owned());
+    }
+    groups.sort();
+    groups.dedup();
+    groups
+}
+
 impl App {
     fn chat_options(&self) -> ChatOptions {
         ChatOptions {
@@ -99,36 +83,182 @@ impl App {
     }
 
     pub fn chat_tab(&mut self, ui: &mut egui::Ui) {
-        let (entries, streaming, models, running) = {
-            let s = self.backend.shared.lock().unwrap();
+        if !self.ctl.settings.ui.chat_warning_acknowledged {
+            kit::panel(ui, ic!(WARNING, "Chat storage warning"), None, |ui| {
+                ui.label("Chat history is saved locally without encryption. Anyone with access to this account can read it.");
+                ui.label(crate::config::chat_store_path().display().to_string());
+                if ui.button("I understand").clicked() {
+                    self.ctl.settings.ui.chat_warning_acknowledged = true;
+                    self.draft.ui.chat_warning_acknowledged = true;
+                    if let Err(e) = self.ctl.settings.save() {
+                        self.ctl.logs.app_error(format!(
+                            "Failed to save chat warning acknowledgement: {e:#}"
+                        ));
+                    }
+                }
+            });
+            return;
+        }
+        let (entries, streaming, models, running, saved_chats, active_id, active_group, config) = {
+            let s = self.ctl.backend.shared.lock().unwrap();
             (
                 s.chat.entries.clone(),
                 s.chat.streaming,
                 s.models.clone(),
                 s.running.clone(),
+                s.saved_chats.clone(),
+                s.chat_id.clone(),
+                s.chat_group.clone(),
+                s.chat_config.clone(),
             )
         };
-        // Default to a model already in memory, so the first answer comes quickly.
-        if !models.iter().any(|m| m.name == self.chat_model) {
-            self.chat_model = running
-                .iter()
-                .find(|r| models.iter().any(|m| m.name == r.name))
-                .map(|r| r.name.clone())
-                .or_else(|| models.first().map(|m| m.name.clone()))
-                .unwrap_or_default();
+        if self.chat_active_id != active_id {
+            self.chat_active_id.clone_from(&active_id);
+            self.chat_model.clone_from(&config.model);
+            self.chat_system.clone_from(&config.system);
+            self.chat_ctx = config.context;
+            self.chat_temperature = config.temperature;
+            self.chat_markdown = config.markdown;
         }
+        self.chat_model = preferred_model(&self.chat_model, &models, &running);
 
+        let groups = chat_groups(&saved_chats, &active_group);
+        let mut switched_chat = false;
+        let mut delete_chat = None;
         ui.horizontal(|ui| {
             ui.heading("Chat");
+            ui.scope(|ui| {
+                ui.style_mut().always_scroll_the_only_direction = true;
+                egui::ScrollArea::horizontal()
+                    .id_salt("chat_history_tabs")
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            let mut group_order = vec![String::new()];
+                            group_order.extend(groups.iter().cloned());
+                            let found_active = saved_chats.iter().any(|chat| chat.id == active_id);
+                            for group in group_order {
+                                if !group.is_empty() {
+                                    let collapsed = self.collapsed_chat_groups.contains(&group);
+                                    if ui
+                                        .selectable_label(
+                                            !collapsed,
+                                            format!(
+                                                "{} {group}",
+                                                if collapsed { "▸" } else { "▾" }
+                                            ),
+                                        )
+                                        .clicked()
+                                    {
+                                        if collapsed {
+                                            self.collapsed_chat_groups.remove(&group);
+                                        } else {
+                                            self.collapsed_chat_groups.insert(group.clone());
+                                        }
+                                    }
+                                    if collapsed {
+                                        continue;
+                                    }
+                                }
+                                for chat in saved_chats.iter().filter(|chat| chat.group == group) {
+                                    if self.chat_rename_id.as_deref() == Some(&chat.id) {
+                                        let response = ui.add(
+                                            egui::TextEdit::singleline(&mut self.chat_rename_text)
+                                                .desired_width(130.0),
+                                        );
+                                        response.request_focus();
+                                        let commit = response.lost_focus()
+                                            || (response.has_focus()
+                                                && ui.input(|input| {
+                                                    input.key_pressed(egui::Key::Enter)
+                                                }));
+                                        if commit {
+                                            let result = self.ctl.backend.rename_saved_chat(
+                                                &chat.id,
+                                                self.chat_rename_text.clone(),
+                                            );
+                                            if let Err(e) = result {
+                                                self.ctl.logs.app_error(format!(
+                                                    "Failed to rename chat: {e:#}"
+                                                ));
+                                            }
+                                            self.chat_rename_id = None;
+                                        }
+                                    } else {
+                                        let response =
+                                            ui.selectable_label(chat.id == active_id, &chat.title);
+                                        if response.double_clicked() {
+                                            self.chat_rename_id = Some(chat.id.clone());
+                                            self.chat_rename_text.clone_from(&chat.title);
+                                        } else if response.clicked() && chat.id != active_id {
+                                            match self.ctl.backend.load_saved_chat(&chat.id) {
+                                                Ok(()) => switched_chat = true,
+                                                Err(e) => self.ctl.logs.app_error(format!(
+                                                    "Failed to load saved chat: {e:#}"
+                                                )),
+                                            }
+                                        }
+                                    }
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text("Close and delete chat")
+                                        .clicked()
+                                    {
+                                        delete_chat = Some(chat.id.clone());
+                                    }
+                                    ui.menu_button("⋯", |ui| {
+                                        ui.label("Move to group");
+                                        if ui.button("Ungroup").clicked()
+                                            && let Err(e) = self
+                                                .ctl
+                                                .backend
+                                                .set_saved_chat_group(&chat.id, String::new())
+                                        {
+                                            self.ctl
+                                                .logs
+                                                .app_error(format!("Failed to move chat: {e:#}"));
+                                        }
+                                        for target in &groups {
+                                            if ui.button(target).clicked()
+                                                && let Err(e) = self
+                                                    .ctl
+                                                    .backend
+                                                    .set_saved_chat_group(&chat.id, target.clone())
+                                            {
+                                                self.ctl.logs.app_error(format!(
+                                                    "Failed to move chat: {e:#}"
+                                                ));
+                                            }
+                                        }
+                                    });
+                                }
+                                if !found_active && group == active_group {
+                                    let _ = ui.selectable_label(true, "New chat");
+                                    if ui
+                                        .small_button("×")
+                                        .on_hover_text("Close and delete chat")
+                                        .clicked()
+                                    {
+                                        delete_chat = Some(active_id.clone());
+                                    }
+                                }
+                            }
+                        });
+                    });
+            });
+            ui.menu_button("+ Group", |ui| {
+                ui.text_edit_singleline(&mut self.chat_group_name);
+                if ui.button("Group current chat").clicked() {
+                    let name = self.chat_group_name.trim().to_owned();
+                    if !name.is_empty() {
+                        self.ctl.backend.set_current_chat_group(name);
+                    }
+                    ui.close();
+                }
+            });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(
-                        !entries.is_empty(),
-                        egui::Button::new(ic!(NEW_CHAT, "New chat")),
-                    )
-                    .clicked()
-                {
-                    self.backend.shared.lock().unwrap().chat.clear();
+                if ui.button(ic!(NEW_CHAT, "New chat")).clicked() {
+                    self.ctl.backend.new_chat();
+                    switched_chat = true;
                 }
                 if ui
                     .add_enabled(
@@ -141,6 +271,16 @@ impl App {
                 }
             });
         });
+        if let Some(id) = delete_chat {
+            if id == active_id {
+                switched_chat = true;
+            }
+            if let Err(e) = self.ctl.backend.delete_saved_chat(&id) {
+                self.ctl
+                    .logs
+                    .app_error(format!("Failed to delete chat: {e:#}"));
+            }
+        }
         ui.add_space(8.0);
 
         kit::panel(ui, ic!(TUNE, "Model & options"), None, |ui| {
@@ -169,6 +309,9 @@ impl App {
                 ui.label("Context");
                 crate::views::models::context_picker(ui, "chat_ctx", &mut self.chat_ctx);
                 ui.add_space(16.0);
+                ui.checkbox(&mut self.chat_markdown, "Render Markdown")
+                    .on_hover_text("Off shows the raw text the model sent");
+                ui.add_space(16.0);
                 let mut custom = self.chat_temperature.is_some();
                 if ui.checkbox(&mut custom, "Temperature").changed() {
                     self.chat_temperature = custom.then_some(0.7);
@@ -193,6 +336,15 @@ impl App {
                     );
                 });
         });
+        if !switched_chat {
+            self.ctl.backend.set_chat_config(ChatConfig {
+                model: self.chat_model.clone(),
+                system: self.chat_system.clone(),
+                context: self.chat_ctx,
+                temperature: self.chat_temperature,
+                markdown: self.chat_markdown,
+            });
+        }
 
         egui::Panel::bottom("chat_input")
             .resizable(false)
@@ -228,9 +380,15 @@ impl App {
                                 ChatEntry::User(text) => {
                                     user_message(ui, i, text, &models, &self.chat_model, streaming)
                                 }
-                                ChatEntry::Assistant { variants, selected } => {
-                                    assistant_message(ui, i, variants, *selected, &models, streaming)
-                                }
+                                ChatEntry::Assistant { variants, selected } => assistant_message(
+                                    ui,
+                                    i,
+                                    variants,
+                                    *selected,
+                                    &models,
+                                    streaming,
+                                    self.chat_markdown.then_some(&mut self.markdown_cache),
+                                ),
                             };
                             action = action.take().or(a);
                         }
@@ -243,26 +401,29 @@ impl App {
         }
         match action {
             Some(Action::Edit(at)) => {
-                let mut s = self.backend.shared.lock().unwrap();
+                let mut s = self.ctl.backend.shared.lock().unwrap();
                 if let Some(ChatEntry::User(text)) = s.chat.entries.get(at) {
                     self.chat_input = text.clone();
                     s.chat.entries.truncate(at);
                 }
                 drop(s);
+                self.ctl.backend.save_current_chat();
                 ui.memory_mut(|m| m.request_focus(egui::Id::unique("chat_input")));
             }
             Some(Action::Reply { at, model }) => {
                 let opts = self.chat_options();
-                self.backend.chat_reply(at, &model, &opts);
+                self.ctl.backend.chat_reply(at, &model, &opts);
             }
             Some(Action::Select { at, variant }) => {
-                let mut s = self.backend.shared.lock().unwrap();
+                let mut s = self.ctl.backend.shared.lock().unwrap();
                 if let Some(ChatEntry::Assistant { variants, selected }) =
                     s.chat.entries.get_mut(at)
                     && variant < variants.len()
                 {
                     *selected = variant;
                 }
+                drop(s);
+                self.ctl.backend.save_current_chat();
             }
             None => {}
         }
@@ -283,7 +444,7 @@ impl App {
             );
             if streaming {
                 if ui.button(ic!(STOP, "Stop")).clicked() {
-                    self.backend.shared.lock().unwrap().chat.stop();
+                    self.ctl.backend.shared.lock().unwrap().chat.stop();
                 }
                 return;
             }
@@ -294,7 +455,7 @@ impl App {
             if can_send && (clicked || enter) {
                 let text = std::mem::take(&mut self.chat_input).trim().to_string();
                 let opts = self.chat_options();
-                self.backend.chat_send(text, &self.chat_model, &opts);
+                self.ctl.backend.chat_send(text, &self.chat_model, &opts);
                 ui.memory_mut(|m| m.request_focus(id));
             }
         });
@@ -355,6 +516,7 @@ fn assistant_message(
     selected: usize,
     models: &[LocalModel],
     streaming: bool,
+    markdown: Option<&mut CommonMarkCache>,
 ) -> Option<Action> {
     let r = variants.get(selected)?;
     let mut action = None;
@@ -398,7 +560,18 @@ fn assistant_message(
                 });
         }
         if !r.content.is_empty() {
-            ui.label(r.content.trim_start());
+            match markdown {
+                // Images stay unloaded: no loaders are installed and `file://` is never implied.
+                Some(cache) => {
+                    ui.push_id(("chat_md", at, selected), |ui| {
+                        CommonMarkViewer::new()
+                            .explicit_image_uri_scheme(true)
+                            .show(ui, cache, r.content.trim_start());
+                    })
+                    .response
+                }
+                None => ui.label(r.content.trim_start()),
+            };
         } else if !r.done {
             ui.horizontal(|ui| {
                 ui.spinner();
@@ -419,7 +592,7 @@ fn assistant_message(
         if r.stopped {
             ui.label(RichText::new("Stopped").color(AMBER));
         }
-        if let Some(line) = stats_line(r) {
+        if let Some(line) = r.stats_line() {
             ui.label(
                 RichText::new(format!("{}  {line}", icon!(SPEED)))
                     .small()

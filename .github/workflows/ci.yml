@@ -26,8 +26,10 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
       - run: cargo fmt --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --all-targets --all-features -- -D warnings
+      - name: TUI only (no GUI dependencies)
+        run: cargo clippy --all-targets --no-default-features --features tui,rustls -- -D warnings
+      - run: cargo test --all-features
       - name: GPU detection on this OS
         run: cargo test detect_and_sample -- --nocapture
 

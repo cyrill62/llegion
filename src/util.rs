@@ -1,4 +1,9 @@
 use std::process::{Command, Stdio};
+use std::sync::Arc;
+use std::time::Duration;
+
+/// Asks the front-end to redraw within the given delay. Called from background threads.
+pub type Repaint = Arc<dyn Fn(Duration) + Send + Sync>;
 
 /// Builds a `Command` that never pops up a console window on Windows.
 pub fn command(program: &str) -> Command {
@@ -79,4 +84,24 @@ pub fn mask_token(token: &str) -> String {
         return "•".repeat(token.len());
     }
     format!("{}…{}", &token[..8], &token[token.len() - 4..])
+}
+
+/// Context sizes offered by the pickers; 0 = server default.
+pub const CONTEXT_PRESETS: [u32; 9] = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 0];
+
+pub fn ctx_label(v: u32) -> String {
+    match v {
+        0 => "Auto (server default)".into(),
+        v if v % 1024 == 0 => format!("{}K tokens", v / 1024),
+        v => format!("{v} tokens"),
+    }
+}
+
+/// "8K", "128K", or the raw number when not a multiple of 1024.
+pub fn ctx_short(c: u64) -> String {
+    if c > 0 && c.is_multiple_of(1024) {
+        format!("{}K", c / 1024)
+    } else {
+        c.to_string()
+    }
 }

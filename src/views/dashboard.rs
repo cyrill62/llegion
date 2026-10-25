@@ -8,7 +8,7 @@ use crate::views::kit;
 
 impl App {
     pub fn dashboard(&mut self, ui: &mut egui::Ui) {
-        let s = self.backend.shared.lock().unwrap();
+        let s = self.ctl.backend.shared.lock().unwrap();
         let last = s.history.back().cloned();
         let running = s.running.clone();
         let n_models = s.models.len();
@@ -67,7 +67,7 @@ impl App {
             kit::panel(&mut cols[0], ic!(SERVER, "Server"), None, |ui| {
                 kit::kv_grid(ui, "dash_server", |ui| {
                     ui.label("Mode");
-                    ui.label(if self.settings.server.manage_server {
+                    ui.label(if self.ctl.settings.server.manage_server {
                         "Managed by this app"
                     } else {
                         "External (service / tray app)"
@@ -76,11 +76,11 @@ impl App {
                     ui.label("Listening on");
                     ui.label(format!(
                         "{}:{}",
-                        self.settings.effective_bind_host(),
-                        self.settings.server.port
+                        self.ctl.settings.effective_bind_host(),
+                        self.ctl.settings.server.port
                     ));
                     ui.end_row();
-                    if let Some(started) = self.ollama_proc.started {
+                    if let Some(started) = self.ctl.ollama_proc.started {
                         ui.label("Uptime");
                         ui.label(format_duration_secs(started.elapsed().as_secs() as i64));
                         ui.end_row();
@@ -99,8 +99,8 @@ impl App {
             kit::panel(&mut cols[1], ic!(LOCK, "Network & security"), None, |ui| {
                 kit::kv_grid(ui, "dash_net", |ui| {
                     ui.label("HTTPS proxy");
-                    if self.settings.proxy.enabled {
-                        let (text, color) = if self.caddy_proc.is_running() {
+                    if self.ctl.settings.proxy.enabled {
+                        let (text, color) = if self.ctl.caddy_proc.is_running() {
                             ("Running", GREEN)
                         } else {
                             ("Stopped", AMBER)
@@ -110,20 +110,20 @@ impl App {
                         kit::badge(ui, "Disabled", Color32::GRAY);
                     }
                     ui.end_row();
-                    if self.settings.proxy.enabled {
+                    if self.ctl.settings.proxy.enabled {
                         ui.label("Public URL");
                         ui.add(
                             egui::Label::new(
-                                RichText::new(caddy::public_url(&self.settings)).monospace(),
+                                RichText::new(caddy::public_url(&self.ctl.settings)).monospace(),
                             )
                             .wrap(),
                         );
                         ui.end_row();
                         ui.label("API token");
-                        if self.settings.proxy.require_token {
+                        if self.ctl.settings.proxy.require_token {
                             kit::badge(
                                 ui,
-                                format!("{} active", self.settings.proxy.tokens.len()),
+                                format!("{} active", self.ctl.settings.proxy.tokens.len()),
                                 GREEN,
                             );
                         } else {
@@ -169,7 +169,7 @@ impl App {
             ui,
             &g.name,
             |ui| {
-                let enabled = self.settings.is_gpu_enabled(g);
+                let enabled = self.ctl.settings.is_gpu_enabled(g);
                 kit::badge(
                     ui,
                     if enabled { "Enabled" } else { "Disabled" },

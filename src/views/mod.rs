@@ -4,6 +4,7 @@ pub mod chat;
 pub mod dashboard;
 pub mod gpu;
 pub mod kit;
+pub mod launcher;
 pub mod logs;
 pub mod models;
 pub mod performance;

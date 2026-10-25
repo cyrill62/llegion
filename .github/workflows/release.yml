@@ -35,8 +35,8 @@ jobs:
       - name: Linux GUI dependencies
         if: runner.os == 'Linux' && !matrix.alpine
         run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
-      - name: LLVM (ring needs clang on Windows ARM64)
-        if: matrix.targets == 'windows-arm64'
+      - name: LLVM (Windows ARM64)
+        if: runner.os == 'Windows' && matrix.targets == 'windows-arm64'
         shell: pwsh
         run: |
           if (-not (Get-Command clang -ErrorAction SilentlyContinue)) { choco install llvm -y --no-progress }

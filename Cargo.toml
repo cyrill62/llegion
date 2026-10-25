@@ -1,26 +1,45 @@
 [package]
-name = "ollama-egui"
-version = "0.1.0"
+name = "llegion"
+version = "0.2.0"
 edition = "2024"
 license = "MIT"
-description = "Cross-platform desktop control panel for Ollama"
-repository = "https://github.com/cyrill62/ollama-egui"
+description = "Cross-platform control panel for Ollama, as a desktop app and a terminal UI"
+repository = "https://github.com/cyrill62/llegion"
 readme = "README.md"
-keywords = ["ollama", "llm", "egui", "gui"]
-categories = ["gui"]
+keywords = ["ollama", "llm", "egui", "gui", "tui"]
+categories = ["gui", "command-line-utilities"]
+default-run = "llegion"
+
+[[bin]]
+name = "llegion"
+path = "src/main.rs"
+required-features = ["gui"]
+
+[[bin]]
+name = "llegion-tui"
+path = "src/bin/llegion-tui.rs"
+required-features = ["tui"]
 
 [dependencies]
 anyhow = "1.0.104"
 chrono = { version = "0.4.45", default-features = false, features = ["clock", "std", "serde"] }
+csv = "1.4.0"
 directories = "6.0.0"
-eframe = "0.37.0"
-egui_material_icons = "0.9.0"
-egui_plot = "0.38.0"
+eframe = { version = "0.37.0", optional = true }
+fs4 = { version = "1.1.0", optional = true }
+# Same egui as eframe; adds the emoji fonts (model output, Markdown code-block copy icon).
+egui = { version = "0.37.0", default-features = false, features = ["monochrome_emoji_fonts"], optional = true }
+egui_commonmark = { version = "0.26.0", default-features = false, features = ["pulldown_cmark"], optional = true }
+egui_material_icons = { version = "0.9.0", optional = true }
+egui_plot = { version = "0.38.0", optional = true }
 getrandom = "0.4.3"
 # Debug-only screenshot capture; already in the tree through eframe's image loading.
-png = "0.18.1"
+png = { version = "0.18.1", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache", "unstable-rendered-line-info"], optional = true }
+rocksdb = { version = "0.24.0", default-features = false, optional = true }
+rusqlite = { version = "0.32.1", features = ["bundled"], optional = true }
 sysinfo = "0.39.6"
 toml = "1.1.8"
 ureq = { version = "3.5.0", default-features = false, features = ["json", "gzip"] }
@@ -30,6 +49,12 @@ strip = true
 lto = "thin"
 
 [features]
-default = ["rustls"]
+default = ["rustls", "gui", "tui", "sqlite"]
+# Desktop GUI: the `llegion` binary.
+gui = ["dep:eframe", "dep:egui", "dep:egui_commonmark", "dep:egui_material_icons", "dep:egui_plot", "dep:png"]
+# Terminal UI: the `llegion-tui` binary (no graphics stack needed).
+tui = ["dep:ratatui"]
 # TLS backend for talking to an HTTPS proxy / remote server.
 rustls = ["ureq/rustls"]
+sqlite = ["dep:rusqlite"]
+rocksdb = ["dep:rocksdb", "dep:fs4"]

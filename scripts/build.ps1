@@ -31,8 +31,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location (Join-Path $PSScriptRoot '..')
 
-$App = 'ollama-egui'
-$Version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"(.+)"' | Select-Object -First 1).Matches.Groups[1].Value
+$App = 'llegion'
+$Tui = 'llegion-tui'
+$Version = (Get-Content VERSION -Raw).Trim()
 $Dist = 'dist'
 
 function Have([string] $cmd) { [bool](Get-Command $cmd -ErrorAction SilentlyContinue) }
@@ -60,6 +61,9 @@ if ($Target) { foreach ($t in $Target) { $targets += Resolve-Target $t } }
 else { $targets = Resolve-Target 'windows' }
 
 if (-not (Have cargo)) { throw 'cargo not found - install Rust from https://rustup.rs' }
+if (($targets | Where-Object { $_ -like 'aarch64-*-windows-msvc' }) -and -not (Have clang)) {
+    throw 'LLVM/Clang is required for Windows ARM64 builds (install LLVM and add its bin folder to PATH)'
+}
 
 $onWindows = ($env:OS -eq 'Windows_NT')
 
@@ -98,16 +102,19 @@ foreach ($t in $targets) {
     if (Have rustup) { rustup target add $t *> $null }
     Write-Host "==> building $t (cargo $builder)"
     switch ($builder) {
-        'build'    { cargo build --release --locked --target $t }
-        'zigbuild' { cargo zigbuild --release --locked --target "$t.2.31" }
-        'cross'    { cross build --release --locked --target $t }
-        'xwin'     { cargo xwin build --release --locked --target $t }
+        'build'    { cargo build --release --locked --features tui --target $t }
+        'zigbuild' { cargo zigbuild --release --locked --features tui --target "$t.2.31" }
+        'cross'    { cross build --release --locked --features tui --target $t }
+        'xwin'     { cargo xwin build --release --locked --features tui --target $t }
     }
     if ($LASTEXITCODE -ne 0) { throw "build failed for $t" }
 
-    $exe = if ($t -like '*-windows-msvc') { "$App.exe" } else { $App }
-    $bin = "target/$t/release/$exe"
-    if (-not (Test-Path $bin)) { throw "expected binary not found: $bin" }
+    $ext = if ($t -like '*-windows-msvc') { '.exe' } else { '' }
+    $bin = "target/$t/release/$App$ext"
+    $tui = "target/$t/release/$Tui$ext"
+    foreach ($b in $bin, $tui) {
+        if (-not (Test-Path $b)) { throw "expected binary not found: $b" }
+    }
     $built += $t
 
     if (-not $NoPackage) {
@@ -115,7 +122,7 @@ foreach ($t in $targets) {
         $stage = Join-Path $Dist $name
         Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
         New-Item -ItemType Directory -Path $stage | Out-Null
-        Copy-Item $bin, README.md $stage
+        Copy-Item $bin, $tui, README.md $stage
         if ($t -like '*-windows-msvc') {
             $archive = "$stage.zip"
             Remove-Item -Force $archive -ErrorAction SilentlyContinue

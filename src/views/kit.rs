@@ -264,7 +264,7 @@ pub fn code_block(ui: &mut egui::Ui, content: &str) {
 }
 
 /// Large selectable entry for side navigation lists.
-pub fn nav_item(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
+pub fn nav_item(ui: &mut egui::Ui, selected: bool, label: &str) -> egui::Response {
     let mut text = RichText::new(label);
     if selected {
         text = text.strong();
@@ -273,5 +273,5 @@ pub fn nav_item(ui: &mut egui::Ui, selected: bool, label: &str) -> bool {
     let button = egui::Button::selectable(selected, text)
         .right_text("")
         .min_size(egui::vec2(ui.available_width(), 46.0));
-    ui.add(button).clicked()
+    ui.add(button)
 }

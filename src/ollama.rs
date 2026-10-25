@@ -81,7 +81,7 @@ impl ShowResponse {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Deserialize, Serialize)]
 #[serde(default)]
 pub struct GenerateStats {
     pub total_duration: u64,

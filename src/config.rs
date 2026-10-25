@@ -212,6 +212,7 @@ impl Default for LogSettings {
 #[serde(default)]
 pub struct UiSettings {
     pub dark_mode: bool,
+    pub chat_warning_acknowledged: bool,
     /// Interface zoom (1.0 = 100 %).
     pub scale: f32,
     pub poll_interval_ms: u64,
@@ -222,6 +223,7 @@ impl Default for UiSettings {
     fn default() -> Self {
         Self {
             dark_mode: true,
+            chat_warning_acknowledged: false,
             scale: 1.25,
             poll_interval_ms: 1000,
             history_seconds: 300,
@@ -245,7 +247,25 @@ pub fn default_log_file() -> Option<PathBuf> {
 }
 
 pub fn config_dir() -> PathBuf {
-    directories::ProjectDirs::from("", "", "ollama-egui")
+    project_config_dir("llegion")
+}
+
+pub fn data_dir() -> PathBuf {
+    directories::ProjectDirs::from("", "", "llegion")
+        .map(|d| d.data_local_dir().to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+pub fn chat_store_path() -> PathBuf {
+    #[cfg(feature = "rocksdb")]
+    let name = "chats-rocksdb";
+    #[cfg(feature = "sqlite")]
+    let name = "chats.db";
+    data_dir().join(name)
+}
+
+fn project_config_dir(name: &str) -> PathBuf {
+    directories::ProjectDirs::from("", "", name)
         .map(|d| d.config_dir().to_path_buf())
         .unwrap_or_else(|| PathBuf::from("."))
 }
@@ -257,6 +277,10 @@ fn config_file() -> PathBuf {
 impl Settings {
     pub fn load() -> Self {
         std::fs::read_to_string(config_file())
+            // Settings saved before the rename to llegion; the next save moves them over.
+            .or_else(|_| {
+                std::fs::read_to_string(project_config_dir("llegion").join("settings.toml"))
+            })
             .ok()
             .and_then(|s| toml::from_str(&s).ok())
             .unwrap_or_default()

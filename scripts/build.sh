@@ -22,9 +22,10 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-APP=ollama-egui
-APP_NAME="Ollama Control"
-VERSION=$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -n1)
+APP=llegion
+TUI=llegion-tui
+APP_NAME="Llegion"
+VERSION=$(tr -d '[:space:]' < VERSION)
 DIST=dist
 PACKAGE=1
 
@@ -118,11 +119,11 @@ builder_for() {
 }
 
 package() {
-  local target=$1 bin=$2
+  local target=$1 bin=$2 tui=$3
   local name="$APP-$VERSION-$target"
   local stage="$DIST/$name"
   rm -rf "$stage" && mkdir -p "$stage"
-  cp "$bin" README.md "$stage/"
+  cp "$bin" "$tui" README.md "$stage/"
   case "$target" in
     *-windows-msvc)
       if have zip; then
@@ -156,7 +157,7 @@ bundle_macos() {
 <dict>
   <key>CFBundleName</key><string>$APP_NAME</string>
   <key>CFBundleDisplayName</key><string>$APP_NAME</string>
-  <key>CFBundleIdentifier</key><string>fr.lepagnot.ollama-egui</string>
+  <key>CFBundleIdentifier</key><string>fr.lepagnot.llegion</string>
   <key>CFBundleExecutable</key><string>$APP</string>
   <key>CFBundleVersion</key><string>$VERSION</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
@@ -186,21 +187,22 @@ for target in ${TARGETS[@]+"${TARGETS[@]}"}; do
   have rustup && rustup target add "$target" >/dev/null 2>&1 || true
   info "building $target (cargo $builder)"
   case "$builder" in
-    build) cargo build --release --locked --target "$target" ;;
+    build) cargo build --release --locked --features tui --target "$target" ;;
     # Pin an old glibc so the binary runs on older distributions.
-    zigbuild) cargo zigbuild --release --locked --target "$target.2.31" ;;
-    cross) cross build --release --locked --target "$target" ;;
+    zigbuild) cargo zigbuild --release --locked --features tui --target "$target.2.31" ;;
+    cross) cross build --release --locked --features tui --target "$target" ;;
     # Link musl dynamically: winit/glow dlopen X11, Wayland and GL, which a static binary can't.
-    musl) RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --locked --target "$target" ;;
-    xwin) cargo xwin build --release --locked --target "$target" ;;
+    musl) RUSTFLAGS="-C target-feature=-crt-static" cargo build --release --locked --features tui --target "$target" ;;
+    xwin) cargo xwin build --release --locked --features tui --target "$target" ;;
   esac
   ext=""
   [[ "$target" == *-windows-msvc ]] && ext=".exe"
   bin="target/$target/release/$APP$ext"
-  [ -f "$bin" ] || die "expected binary not found: $bin"
+  tui="target/$target/release/$TUI$ext"
+  for b in "$bin" "$tui"; do [ -f "$b" ] || die "expected binary not found: $b"; done
   BUILT+=("$target")
   [[ "$target" == *-apple-darwin ]] && MAC_BINS+=("$bin")
-  [ $PACKAGE -eq 1 ] && package "$target" "$bin"
+  [ $PACKAGE -eq 1 ] && package "$target" "$bin" "$tui"
 done
 
 if [ $PACKAGE -eq 1 ] && [ ${#MAC_BINS[@]} -gt 0 ]; then

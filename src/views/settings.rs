@@ -1,4 +1,6 @@
 use eframe::egui::{self, RichText};
+use std::path::Path;
+use std::process::Command;
 
 use crate::app::{AMBER, App, GREEN, RED};
 use crate::caddy;
@@ -44,6 +46,18 @@ impl SettingsPane {
 
 const INPUT_WIDTH: f32 = 380.0;
 
+fn open_folder(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(target_os = "windows")]
+    let mut command = Command::new("explorer");
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = Command::new("xdg-open");
+    command.arg(path).spawn()?;
+    Ok(())
+}
+
 fn text(ui: &mut egui::Ui, value: &mut String, hint: &str) -> egui::Response {
     ui.add(
         egui::TextEdit::singleline(value)
@@ -86,7 +100,7 @@ impl App {
                 self.apply_draft(false);
             }
             let restart_label =
-                if self.settings.server.manage_server || self.draft.server.manage_server {
+                if self.ctl.settings.server.manage_server || self.draft.server.manage_server {
                     ic!(RESTART, "Save & restart services")
                 } else {
                     ic!(RESTART, "Save & restart proxy")
@@ -101,7 +115,7 @@ impl App {
                 .add_enabled(dirty, egui::Button::new(ic!(UNDO, "Revert")))
                 .clicked()
             {
-                self.draft = self.settings.clone();
+                self.draft = self.ctl.settings.clone();
             }
             if dirty {
                 kit::badge(ui, "Unsaved changes", AMBER);
@@ -128,7 +142,7 @@ impl App {
                 kit::card_frame(ui).inner_margin(10.0).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     for pane in SettingsPane::ALL {
-                        if kit::nav_item(ui, self.settings_pane == pane, pane.label()) {
+                        if kit::nav_item(ui, self.settings_pane == pane, pane.label()).clicked() {
                             self.settings_pane = pane;
                         }
                     }
@@ -143,8 +157,8 @@ impl App {
                         SettingsPane::Connection => self.connection_pane(ui),
                         SettingsPane::Server => self.server_pane(ui),
                         SettingsPane::Memory => self.memory_pane(ui),
-                        SettingsPane::Proxy => self.proxy_pane(ui),
-                        SettingsPane::Tokens => self.tokens_pane(ui),
+                        SettingsPane::Proxy => self.managed_only(ui, Self::proxy_pane),
+                        SettingsPane::Tokens => self.managed_only(ui, Self::tokens_pane),
                         SettingsPane::Logs => self.logs_pane(ui),
                         SettingsPane::Application => self.app_pane(ui),
                     });
@@ -213,8 +227,24 @@ impl App {
         });
     }
 
+    /// Shown on server option panes while the server is not managed by this app.
+    fn unmanaged_notice(&self, ui: &mut egui::Ui) {
+        if !self.draft.server.manage_server {
+            kit::badge(
+                ui,
+                ic!(
+                    INFO,
+                    "Only used for a server started by this app: enable \"Manage the server\" in Server"
+                ),
+                AMBER,
+            );
+            ui.add_space(8.0);
+        }
+    }
+
     fn server_pane(&mut self, ui: &mut egui::Ui) {
         let proxy_enabled = self.draft.proxy.enabled;
+        let managed = self.draft.server.manage_server;
         panel(
             ui,
             ic!(SERVER, "Process"),
@@ -254,36 +284,55 @@ impl App {
 
         panel(ui, ic!(CABLE, "Network binding"), None, |ui| {
             let s = &mut self.draft.server;
-            setting(ui, "Bind host", Some("OLLAMA_HOST"), |ui| {
-                ui.add_enabled(
-                    !proxy_enabled,
-                    egui::TextEdit::singleline(&mut s.host).desired_width(180.0),
-                );
-                if ui
-                    .selectable_label(s.host == "127.0.0.1", "Local only")
-                    .clicked()
-                {
-                    s.host = "127.0.0.1".into();
-                }
-                if ui
-                    .selectable_label(s.host == "0.0.0.0", "All interfaces")
-                    .clicked()
-                {
-                    s.host = "0.0.0.0".into();
-                }
+            ui.add_enabled_ui(managed, |ui| {
+                setting(ui, "Bind host", Some("OLLAMA_HOST"), |ui| {
+                    ui.add_enabled(
+                        !proxy_enabled,
+                        egui::TextEdit::singleline(&mut s.host).desired_width(180.0),
+                    );
+                    if ui
+                        .selectable_label(s.host == "127.0.0.1", "Local only")
+                        .clicked()
+                    {
+                        s.host = "127.0.0.1".into();
+                    }
+                    if ui
+                        .selectable_label(s.host == "0.0.0.0", "All interfaces")
+                        .clicked()
+                    {
+                        s.host = "0.0.0.0".into();
+                    }
+                });
             });
-            if proxy_enabled {
+            if managed && proxy_enabled {
                 kit::badge(ui, "Forced to 127.0.0.1 behind the proxy", GREEN);
                 ui.add_space(8.0);
-            } else if s.host != "127.0.0.1" && s.host != "localhost" {
+            } else if managed && s.host != "127.0.0.1" && s.host != "localhost" {
                 kit::badge(ui, ic!(WARNING, "Exposed without authentication"), AMBER);
                 ui.add_space(8.0);
             }
-            setting(ui, "Port", None, |ui| {
-                ui.add(egui::DragValue::new(&mut s.port).range(1..=65535));
+            ui.add_enabled_ui(managed, |ui| {
+                setting(ui, "Port", Some("Also the HTTPS proxy's upstream"), |ui| {
+                    ui.add(egui::DragValue::new(&mut s.port).range(1..=65535));
+                });
             });
         });
 
+        self.unmanaged_notice(ui);
+        ui.add_enabled_ui(managed, |ui| self.server_options(ui));
+
+        let gpus = self.ctl.backend.shared.lock().unwrap().gpus.clone();
+        let env = self.draft.ollama_env(&gpus);
+        panel(
+            ui,
+            ic!(COPY, "System-installed Ollama"),
+            Some("Apply the same settings to the service or tray app:"),
+            |ui| kit::code_block(ui, &service_env_snippet(&env)),
+        );
+    }
+
+    /// Paths, access and extra environment of the managed server.
+    fn server_options(&mut self, ui: &mut egui::Ui) {
         panel(ui, ic!(FOLDER, "Paths & access"), None, |ui| {
             let s = &mut self.draft.server;
             setting(ui, "Models directory", Some("OLLAMA_MODELS"), |ui| {
@@ -316,18 +365,20 @@ impl App {
                 );
             },
         );
-
-        let gpus = self.backend.shared.lock().unwrap().gpus.clone();
-        let env = self.draft.ollama_env(&gpus);
-        panel(
-            ui,
-            ic!(COPY, "System-installed Ollama"),
-            Some("Apply the same settings to the service or tray app:"),
-            |ui| kit::code_block(ui, &service_env_snippet(&env)),
-        );
     }
 
     fn memory_pane(&mut self, ui: &mut egui::Ui) {
+        self.managed_only(ui, Self::memory_options);
+    }
+
+    /// Draws `pane` greyed out, with a notice, while the server is not managed by this app.
+    fn managed_only(&mut self, ui: &mut egui::Ui, pane: fn(&mut Self, &mut egui::Ui)) {
+        self.unmanaged_notice(ui);
+        let managed = self.draft.server.manage_server;
+        ui.add_enabled_ui(managed, |ui| pane(self, ui));
+    }
+
+    fn memory_options(&mut self, ui: &mut egui::Ui) {
         let s = &mut self.draft.server;
         panel(
             ui,
@@ -567,13 +618,14 @@ impl App {
                 let conn = crate::config::Connection {
                     base_url: url.to_string(),
                     api_token: self
+                        .ctl
                         .settings
                         .proxy
                         .tokens
                         .first()
                         .map(|t| t.token.clone())
                         .unwrap_or_default(),
-                    accept_invalid_certs: self.settings.proxy.tls == TlsMode::Internal,
+                    accept_invalid_certs: self.ctl.settings.proxy.tls == TlsMode::Internal,
                 };
                 let slot = self.proxy_test.clone();
                 *slot.lock().unwrap() = Some((false, "testing…".into()));
@@ -775,18 +827,18 @@ impl App {
                 }
             });
             setting(ui, "Theme", None, |ui| {
-                let mut dark = self.settings.ui.dark_mode;
+                let mut dark = self.ctl.settings.ui.dark_mode;
                 choice(
                     ui,
                     &mut dark,
                     &[(true, ic!(DARK, "Dark")), (false, ic!(LIGHT, "Light"))],
                 );
-                if dark != self.settings.ui.dark_mode {
+                if dark != self.ctl.settings.ui.dark_mode {
                     // Applied immediately, like the toggle in the top bar.
-                    self.settings.ui.dark_mode = dark;
+                    self.ctl.settings.ui.dark_mode = dark;
                     self.draft.ui.dark_mode = dark;
                     crate::app::apply_theme(ui.ctx(), dark);
-                    let _ = self.settings.save();
+                    let _ = self.ctl.settings.save();
                 }
             });
         });
@@ -815,7 +867,7 @@ impl App {
         });
 
         panel(ui, ic!(FOLDER, "Configuration files"), None, |ui| {
-            setting(ui, "Folder", None, |ui| {
+            setting(ui, "Configuration folder", None, |ui| {
                 ui.add(
                     egui::Label::new(
                         RichText::new(crate::config::config_dir().display().to_string())
@@ -823,6 +875,28 @@ impl App {
                     )
                     .wrap(),
                 );
+                if ui.button("Open").clicked()
+                    && let Err(e) = open_folder(&crate::config::config_dir())
+                {
+                    self.ctl
+                        .logs
+                        .app_error(format!("Failed to open configuration folder: {e}"));
+                }
+            });
+            setting(ui, "Data folder", None, |ui| {
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(crate::config::data_dir().display().to_string()).monospace(),
+                    )
+                    .wrap(),
+                );
+                if ui.button("Open").clicked()
+                    && let Err(e) = open_folder(&crate::config::data_dir())
+                {
+                    self.ctl
+                        .logs
+                        .app_error(format!("Failed to open data folder: {e}"));
+                }
             });
             setting(
                 ui,

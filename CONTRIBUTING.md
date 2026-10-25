@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in Ollama Control. Bug reports, ideas and pull requests are welcome.
+Thanks for your interest in llegion. Bug reports, ideas and pull requests are welcome.
 
 ## Reporting a bug
 
@@ -66,7 +66,7 @@ The README pictures in `docs/screenshots/` come from a capture mode that exists 
 scripts/screenshots.sh
 ```
 
-It starts the mock server, runs the app with `OLLAMA_EGUI_SCREENSHOTS=docs/screenshots` (default settings, never your own), fills the Chat and Performance tabs, saves one PNG per tab and quits. Set `OLLAMA_EGUI_URL` to capture against a real server instead. On WSLg the window is sometimes dropped at startup ("Connection reset by peer"); run it again.
+It starts the mock server, runs the app with `LLEGION_SCREENSHOTS=docs/screenshots` (default settings, never your own), fills the Chat and Performance tabs, saves one PNG per tab and quits. Set `LLEGION_URL` to capture against a real server instead. On WSLg the window is sometimes dropped at startup ("Connection reset by peer"); run it again.
 
 ## License
 

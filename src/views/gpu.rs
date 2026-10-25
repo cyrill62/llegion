@@ -8,7 +8,7 @@ use crate::views::kit;
 impl App {
     pub fn gpu_tab(&mut self, ui: &mut egui::Ui) {
         let (gpus, detected) = {
-            let s = self.backend.shared.lock().unwrap();
+            let s = self.ctl.backend.shared.lock().unwrap();
             (s.gpus.clone(), s.gpus_detected)
         };
 
@@ -16,7 +16,7 @@ impl App {
             ui.heading("GPU");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(ic!(SEARCH, "Re-detect")).clicked() {
-                    self.backend.redetect_gpus();
+                    self.ctl.backend.redetect_gpus();
                 }
             });
         });

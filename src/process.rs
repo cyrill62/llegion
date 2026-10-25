@@ -13,6 +13,8 @@ pub struct Managed {
     origin: Origin,
     child: Option<Child>,
     pub started: Option<Instant>,
+    /// Environment the running child was started with (empty when stopped).
+    pub env: Vec<(String, String)>,
 }
 
 impl Managed {
@@ -22,6 +24,7 @@ impl Managed {
             origin,
             child: None,
             started: None,
+            env: Vec::new(),
         }
     }
 
@@ -68,6 +71,7 @@ impl Managed {
         ));
         self.child = Some(child);
         self.started = Some(Instant::now());
+        self.env = env.to_vec();
         Ok(())
     }
 
@@ -78,6 +82,7 @@ impl Managed {
             logs.app(format!("Stopped {}", self.name));
         }
         self.started = None;
+        self.env.clear();
     }
 
     /// Detects an unexpected exit; call regularly. Returns true when the process just died.

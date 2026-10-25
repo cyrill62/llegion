@@ -1,6 +1,6 @@
-# Ollama Control
+# Llegion
 
-A cross-platform desktop control panel for [Ollama](https://ollama.com), written in Rust with [egui](https://github.com/emilk/egui). It runs on Linux, Windows and macOS.
+A cross-platform control panel for [Ollama](https://ollama.com), written in Rust: a desktop app built with [egui](https://github.com/emilk/egui) (`llegion`) and a terminal UI built with [ratatui](https://ratatui.rs) (`llegion-tui`) for headless servers and SSH sessions. It runs on Linux, Windows and macOS.
 
 > This is an independent, community project. It is not affiliated with or endorsed by Ollama.
 
@@ -10,9 +10,9 @@ A cross-platform desktop control panel for [Ollama](https://ollama.com), written
 |---|---|
 | **Dashboard** | Server status and version, running models, GPU VRAM bars, CPU/RAM summary |
 | **Models** | Running models (VRAM, CPU/GPU split, context, unload countdown), downloaded models (filter, load with a chosen context, unload, info, delete), pull with progress and cancel |
-| **Chat** | Streamed chat with any downloaded model: model, context, temperature and system prompt; live and final tok/s, time to first token, thinking output. Each message can be copied, edited, resent, or regenerated with another model, and the answers are kept side by side (‹ ›) to compare speed and quality |
+| **Chat** | Streamed chat with any downloaded model, answers rendered as Markdown (lists, tables, code blocks with highlighting and a copy button): model, context, temperature and system prompt; live and final tok/s, time to first token, thinking output. Each message can be copied, edited, resent, or regenerated with another model, and the answers are kept side by side (‹ ›) to compare speed and quality |
 | **Performance** | Live charts for system and Ollama CPU, RAM, GPU utilisation and VRAM; a tokens/s benchmark that uses Ollama's own timing counters |
-| **GPU** | Detects brand, model, type (discrete/integrated/unified), VRAM, usage and temperature. Modes: Auto / Custom (choose devices) / CPU only, an *integrated GPU* switch and a Vulkan toggle |
+| **GPU** | Detects brand, model, type (discrete/integrated/unified), VRAM, usage and temperature. Modes: Auto / Custom (choose devices) / CPU only, an *integrated GPU* switch and a Vulkan toggle. Available only when the app manages the server, since the selection is passed to the `ollama serve` it starts (the server options, port and HTTPS proxy settings are greyed out too) |
 | **Logs** | Live log stream from the managed server, the official app's `server.log`, or `journalctl -u ollama`. Level filter, source filter, search, pause, copy, save |
 | **Settings** | Panes: Connection (URL + bearer token) · Server (process, binding, paths, extra env, service snippet) · Models & memory (context length, keep-alive, parallelism, flash attention, KV cache) · HTTPS proxy · API tokens · Logs · Application (interface scale, theme, polling) |
 
@@ -57,13 +57,26 @@ You can create, label, copy, regenerate and revoke tokens from Settings. *Test p
 
 Detection sources: `nvidia-smi` (all OSes, including WSL), `/sys/class/drm` + `lspci` (AMD/Intel on Linux), the display-adapter registry keys (Windows) and `system_profiler` (macOS). Live utilisation and temperature are available for NVIDIA and for AMD on Linux.
 
+## Terminal UI
+
+`llegion-tui` has the same seven tabs on top of the same core (settings file, managed server, HTTPS proxy, logs, benchmarks), drawn in the terminal. Keys: `Tab`/`1`-`7` switch tabs, `S`/`R` start-stop/restart the managed server, `P` the proxy, `?` lists the rest; each tab shows its own keys on the bottom line. The mouse works too: click a tab, a list row (click the selected row again to open or edit it) or a key hint on the bottom line, and use the wheel to scroll. While the TUI captures the mouse, select text with Shift+drag (most terminals). Settings are edited in the Settings and GPU tabs and saved with `w` (`W` also restarts the services).
+
+Differences from the desktop app: chat answers are shown as plain text (no Markdown rendering) and the message input is a single line; the API tokens are managed in a popup from Settings → Proxy → API tokens.
+
+Chat history is saved unencrypted in a local database at `~/.local/share/llegion` on Linux. SQLite is used by default (`chats.db`); build with `--no-default-features --features "rustls,gui,tui,rocksdb"` to use RocksDB instead (`chats-rocksdb`). The RocksDB feature requires LLVM/Clang's `libclang`; the SQLite build does not. When SQLite first opens a previous RocksDB database, it preserves it as `chats-rocksdb` so it can still be opened with the RocksDB feature. The first time you open Chat, the app asks you to acknowledge that anyone with access to your account can read the saved conversations.
+
 ## Build
 
+The front-ends are cargo features, `gui` and `tui`, both on by default:
+
 ```sh
-cargo run --release
+cargo run --release                                      # desktop app (llegion)
+cargo build --release                                    # both binaries: llegion and llegion-tui
+cargo run --release --bin llegion-tui                    # terminal UI
+cargo build --release --no-default-features --features tui,rustls   # terminal UI only, no GUI libraries needed
 ```
 
-Linux needs the usual desktop libraries (`libxkbcommon`, plus `libxkbcommon-x11` for X11, Wayland or X11, and GL/Vulkan drivers).
+The desktop app on Linux needs the usual desktop libraries (`libxkbcommon`, plus `libxkbcommon-x11` for X11, Wayland or X11, and GL/Vulkan drivers). The terminal UI needs none of them when built without the `gui` feature.
 
 ### Release packages (x86_64 and arm64)
 
@@ -78,6 +91,8 @@ Linux needs the usual desktop libraries (`libxkbcommon`, plus `libxkbcommon-x11`
 .\scripts\build.ps1 windows-arm64
 ```
 
+The scripts build with `--features tui`, so each archive holds both `llegion` and `llegion-tui` (the macOS `.app` bundle contains the desktop app only).
+
 Targets: `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`, `macos-x64`, `macos-arm64`, `windows-x64`, `windows-arm64` (or the groups `linux`, `macos`, `windows`, `all`, or full Rust triples). Archives go to `dist/`. A target the current machine can't build is skipped, with the reason shown.
 
 | Target | Native host | Cross-compiling needs |
@@ -88,7 +103,7 @@ Targets: `linux-x64`, `linux-arm64`, `linux-musl-x64`, `linux-musl-arm64`, `maco
 | Windows x64 | Windows + VS 2022 Build Tools (C++) | `cargo-xwin` from Linux/macOS (downloads the MSVC SDK) |
 | Windows arm64 | Windows + VS "MSVC ARM64 build tools" + LLVM clang (`winget install LLVM.LLVM`) | `cargo-xwin` |
 
-Settings are saved in the platform config directory (`~/.config/ollama-egui/settings.toml` on Linux, `%APPDATA%\ollama-egui\config` on Windows, `~/Library/Application Support/ollama-egui` on macOS). The file holds your API tokens and is created with owner-only permissions on Unix.
+Settings are saved in the platform config directory (`~/.config/llegion/settings.toml` on Linux, `%APPDATA%\llegion\config` on Windows, `~/Library/Application Support/llegion` on macOS). The file holds your API tokens and is created with owner-only permissions on Unix. Settings from the former `llegion` directory are read until the first save.
 
 ## Notes
 
@@ -98,7 +113,7 @@ Settings are saved in the platform config directory (`~/.config/ollama-egui/sett
 ## Tests
 
 ```sh
-cargo test                       # unit tests
+cargo test --all-features        # unit tests (core, desktop and terminal UI)
 cargo test e2e -- --ignored      # end-to-end: needs python3 and caddy (or CADDY=/path/to/caddy)
 ```
 
@@ -107,7 +122,7 @@ cargo test e2e -- --ignored      # end-to-end: needs python3 and caddy (or CADDY
 
 ## CI and releases
 
-`.github/workflows/ci.yml` runs fmt, clippy (`-D warnings`) and the tests on Linux, Windows and macOS. This includes the real GPU probes on each OS and the end-to-end test on Linux.
+`.github/workflows/ci.yml` runs fmt, clippy (`-D warnings`, with all features and with the terminal UI alone) and the tests on Linux, Windows and macOS. This includes the real GPU probes on each OS and the end-to-end test on Linux.
 Pushing a `v*` tag runs `.github/workflows/release.yml`. It calls the same build scripts on native runners (Linux x64/arm64 glibc and musl, macOS universal, Windows x64/arm64) and attaches the archives to a draft GitHub release.
 
 TLS for the client is behind the default `rustls` feature. `--no-default-features` builds without it, which is handy for cross-target `cargo check` without a C toolchain.

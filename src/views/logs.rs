@@ -2,7 +2,7 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::app::{AMBER, App, RED};
 use crate::config::LogSource;
-use crate::logs::{Level, LogLine, Origin};
+use crate::logs::{Level, LogLine, line_filter};
 use crate::views::kit;
 
 fn level_color(level: Level, ui: &egui::Ui) -> Color32 {
@@ -18,7 +18,7 @@ impl App {
     fn refresh_log_cache(&mut self) {
         let v = &self.log_view;
         let key = (
-            self.logs.generation(),
+            self.ctl.logs.generation(),
             v.filter.clone(),
             v.min_level,
             [v.show_ollama, v.show_caddy, v.show_app],
@@ -26,18 +26,10 @@ impl App {
         if v.paused || v.cache_key.as_ref() == Some(&key) {
             return;
         }
-        let needle = v.filter.to_lowercase();
-        let (min, origins) = (v.min_level, key.3);
-        self.log_view.cache = self.logs.snapshot_filtered(|l: &LogLine| {
-            let origin_ok = match l.origin {
-                Origin::Ollama => origins[0],
-                Origin::Caddy => origins[1],
-                Origin::App => origins[2],
-            };
-            origin_ok
-                && l.level >= min
-                && (needle.is_empty() || l.text.to_lowercase().contains(&needle))
-        });
+        self.log_view.cache =
+            self.ctl
+                .logs
+                .snapshot_filtered(line_filter(key.3, v.min_level, &v.filter));
         self.log_view.cache_key = Some(key);
     }
 
@@ -73,9 +65,9 @@ impl App {
                     });
                 if self.draft.logs.source != before {
                     // Switching sources is harmless; apply just that field immediately.
-                    self.settings.logs.source = self.draft.logs.source;
-                    let _ = self.settings.save();
-                    self.sync_log_follower();
+                    self.ctl.settings.logs.source = self.draft.logs.source;
+                    let _ = self.ctl.settings.save();
+                    self.ctl.sync_log_follower();
                 }
                 ui.separator();
                 ui.label("Minimum level");
@@ -108,7 +100,7 @@ impl App {
                     self.log_view.paused = !self.log_view.paused;
                 }
                 if ui.button(ic!(DELETE, "Clear")).clicked() {
-                    self.logs.clear();
+                    self.ctl.logs.clear();
                 }
                 if ui.button(ic!(COPY, "Copy")).clicked() {
                     ui.ctx().copy_text(self.visible_log_text());
@@ -121,8 +113,11 @@ impl App {
                     let res = std::fs::create_dir_all(crate::config::config_dir())
                         .and_then(|_| std::fs::write(&path, self.visible_log_text()));
                     match res {
-                        Ok(()) => self.logs.app(format!("Saved logs to {}", path.display())),
-                        Err(e) => self.logs.app_error(format!("Failed to save logs: {e}")),
+                        Ok(()) => self
+                            .ctl
+                            .logs
+                            .app(format!("Saved logs to {}", path.display())),
+                        Err(e) => self.ctl.logs.app_error(format!("Failed to save logs: {e}")),
                     }
                 }
                 ui.label(RichText::new(format!("{} lines", self.log_view.cache.len())).weak());
@@ -130,22 +125,23 @@ impl App {
                     ui.label(RichText::new("paused").color(AMBER));
                 }
             });
-            match self.settings.logs.source {
+            match self.ctl.settings.logs.source {
                 LogSource::File => {
                     ui.label(
-                        RichText::new(format!("Following {}", self.settings.logs.file_path)).weak(),
+                        RichText::new(format!("Following {}", self.ctl.settings.logs.file_path))
+                            .weak(),
                     );
                 }
                 LogSource::Journal => {
                     ui.label(
                         RichText::new(format!(
                             "Following journalctl -u {}",
-                            self.settings.logs.journal_unit
+                            self.ctl.settings.logs.journal_unit
                         ))
                         .weak(),
                     );
                 }
-                LogSource::Managed if !self.settings.server.manage_server => {
+                LogSource::Managed if !self.ctl.settings.server.manage_server => {
                     ui.label(
                     RichText::new("The server is not managed by this app; pick a log file or the journal to see its output.")
                         .color(AMBER),

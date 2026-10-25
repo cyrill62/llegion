@@ -48,7 +48,7 @@ fn managed_server_behind_token_proxy() {
         .start("sh", &["-c", &script], &s.ollama_env(&[]), &logs)
         .unwrap();
 
-    let dir = std::env::temp_dir().join(format!("ollama-egui-e2e-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("llegion-e2e-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let caddyfile = dir.join("Caddyfile");
     std::fs::write(&caddyfile, caddy::generate(&s)).unwrap();

@@ -1,14 +1,14 @@
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use eframe::egui::{self, Color32, RichText};
 
-use crate::backend::Backend;
 use crate::caddy;
-use crate::config::{LogSource, Settings};
-use crate::logs::{Follower, Level, LogBuffer, LogLine, Origin, follow_file, follow_journal};
-use crate::ollama::Client;
-use crate::process::Managed;
+use crate::config::Settings;
+use crate::control::Control;
+use crate::logs::{Level, LogLine};
+use crate::util::Repaint;
 use crate::views::kit;
 use crate::views::settings::SettingsPane;
 
@@ -16,11 +16,30 @@ pub const GREEN: Color32 = Color32::from_rgb(80, 200, 120);
 pub const RED: Color32 = Color32::from_rgb(230, 90, 80);
 pub const AMBER: Color32 = Color32::from_rgb(235, 175, 60);
 
+fn load_logo(ctx: &egui::Context, bytes: &[u8], name: &str) -> egui::TextureHandle {
+    let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
+    let mut reader = decoder.read_info().expect("embedded logo PNG");
+    let mut pixels = vec![0; reader.output_buffer_size().expect("logo dimensions")];
+    let info = reader
+        .next_frame(&mut pixels)
+        .expect("embedded logo PNG frame");
+    pixels.truncate(info.buffer_size());
+    ctx.load_texture(
+        name,
+        egui::ColorImage::from_rgba_unmultiplied(
+            [info.width as usize, info.height as usize],
+            &pixels,
+        ),
+        egui::TextureOptions::LINEAR,
+    )
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tab {
     Dashboard,
     Models,
     Chat,
+    Launcher,
     Performance,
     Gpu,
     Logs,
@@ -28,10 +47,11 @@ pub enum Tab {
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] = [
+    pub const ALL: [Tab; 8] = [
         Tab::Dashboard,
         Tab::Models,
         Tab::Chat,
+        Tab::Launcher,
         Tab::Performance,
         Tab::Gpu,
         Tab::Logs,
@@ -43,6 +63,7 @@ impl Tab {
             Tab::Dashboard => ic!(HOME, "Dashboard"),
             Tab::Models => ic!(MODELS, "Models"),
             Tab::Chat => ic!(CHAT, "Chat"),
+            Tab::Launcher => ic!(PLAY, "Launcher"),
             Tab::Performance => ic!(CHART, "Performance"),
             Tab::Gpu => ic!(GPU, "GPU"),
             Tab::Logs => ic!(LOGS, "Logs"),
@@ -65,16 +86,12 @@ pub struct LogView {
 }
 
 pub struct App {
-    /// Settings currently in effect.
-    pub settings: Settings,
+    /// Settings in effect, backend, logs and child processes.
+    pub ctl: Control,
     /// Settings being edited in the Settings / GPU tabs.
     pub draft: Settings,
-    pub backend: Backend,
-    pub logs: LogBuffer,
-    pub ollama_proc: Managed,
-    pub caddy_proc: Managed,
-    follower: Option<Follower>,
-    follower_key: Option<(LogSource, String, String)>,
+    logo_light: egui::TextureHandle,
+    logo_dark: egui::TextureHandle,
     pub tab: Tab,
 
     // Models tab
@@ -91,12 +108,20 @@ pub struct App {
     pub bench_ctx: u32,
 
     // Chat tab
+    pub chat_active_id: String,
+    pub chat_rename_id: Option<String>,
+    pub chat_rename_text: String,
+    pub chat_group_name: String,
+    pub collapsed_chat_groups: HashSet<String>,
     pub chat_model: String,
     pub chat_input: String,
     pub chat_system: String,
     pub chat_ctx: u32,
     /// `None` keeps the model's own default.
     pub chat_temperature: Option<f32>,
+    pub chat_markdown: bool,
+    pub launcher_selected: String,
+    pub markdown_cache: egui_commonmark::CommonMarkCache,
 
     pub log_view: LogView,
 
@@ -108,10 +133,6 @@ pub struct App {
     pub settings_pane: SettingsPane,
     /// Zoom factor currently applied to the context (follows the draft for live preview).
     applied_scale: f32,
-    /// Start the server once GPU detection finished (device filters depend on it).
-    pending_autostart: bool,
-    /// Recent automatic restarts, to give up on a crash loop.
-    crash_restarts: Vec<Instant>,
     #[cfg(debug_assertions)]
     pub capture: Option<crate::screenshots::Capture>,
 }
@@ -128,32 +149,27 @@ impl App {
         };
         #[cfg(not(debug_assertions))]
         let settings = Settings::load();
-        let logs = LogBuffer::new(settings.logs.max_lines);
-        logs.set_repaint(cc.egui_ctx.clone());
-        logs.app(format!(
-            "Settings: {}",
-            crate::config::config_dir().display()
-        ));
-        let backend = Backend::new(
-            cc.egui_ctx.clone(),
-            Client::new(&settings.connection),
-            logs.clone(),
-            settings.ui.poll_interval_ms,
-            settings.ui.history_seconds,
+        let ctx = cc.egui_ctx.clone();
+        let logo_light = load_logo(
+            &ctx,
+            include_bytes!("../assets/logo-light@2x.png"),
+            "logo-light",
         );
+        let logo_dark = load_logo(
+            &ctx,
+            include_bytes!("../assets/logo-dark@2x.png"),
+            "logo-dark",
+        );
+        let repaint: Repaint = Arc::new(move |after| ctx.request_repaint_after(after));
         egui_material_icons::initialize(&cc.egui_ctx);
         apply_style(&cc.egui_ctx);
         apply_theme(&cc.egui_ctx, settings.ui.dark_mode);
 
         let mut app = Self {
             draft: settings.clone(),
-            settings,
-            backend,
-            logs,
-            ollama_proc: Managed::new("ollama serve", Origin::Ollama),
-            caddy_proc: Managed::new("caddy", Origin::Caddy),
-            follower: None,
-            follower_key: None,
+            logo_light,
+            logo_dark,
+            ctl: Control::new(settings, repaint),
             tab: Tab::Dashboard,
             model_filter: String::new(),
             pull_name: String::new(),
@@ -164,11 +180,19 @@ impl App {
             bench_prompt: "Write a 300-word story about a lighthouse keeper who discovers a message in a bottle.".into(),
             bench_tokens: 256,
             bench_ctx: 0,
+            chat_active_id: String::new(),
+            chat_rename_id: None,
+            chat_rename_text: String::new(),
+            chat_group_name: String::new(),
+            collapsed_chat_groups: HashSet::new(),
             chat_model: String::new(),
             chat_input: String::new(),
             chat_system: String::new(),
             chat_ctx: 0,
             chat_temperature: None,
+            chat_markdown: true,
+            launcher_selected: "claude".into(),
+            markdown_cache: Default::default(),
             log_view: LogView {
                 filter: String::new(),
                 min_level: Level::Debug,
@@ -187,21 +211,15 @@ impl App {
             confirm_reset: false,
             settings_pane: SettingsPane::Connection,
             applied_scale: 0.0,
-            pending_autostart: false,
-            crash_restarts: Vec::new(),
             #[cfg(debug_assertions)]
             capture,
         };
         #[cfg(debug_assertions)]
         if app.capture.is_some() {
             // Drops the "Settings: <config dir>" line, which shows the user's home path.
-            app.logs.clear();
+            app.ctl.logs.clear();
         }
-        app.sync_log_follower();
-        app.pending_autostart = app.settings.server.manage_server && app.settings.server.auto_start;
-        if app.settings.proxy.enabled && app.settings.proxy.auto_start {
-            app.start_caddy();
-        }
+        app.ctl.start();
         app
     }
 
@@ -210,127 +228,16 @@ impl App {
 
     /// Commits the draft: persists it and reconfigures running components.
     pub fn apply_draft(&mut self, restart_services: bool) {
-        let old = std::mem::replace(&mut self.settings, self.draft.clone());
-        match self.settings.save() {
-            Ok(path) => self
-                .logs
-                .app(format!("Saved settings to {}", path.display())),
-            Err(e) => self
-                .logs
-                .app_error(format!("Failed to save settings: {e:#}")),
-        }
-        if old.connection != self.settings.connection {
-            self.backend
-                .set_client(Client::new(&self.settings.connection));
-        }
-        self.backend.set_timing(
-            self.settings.ui.poll_interval_ms,
-            self.settings.ui.history_seconds,
-        );
-        self.logs.set_max(self.settings.logs.max_lines);
-        if self.settings.proxy.enabled
-            && let Err(e) = caddy::write(&self.settings)
-        {
-            self.logs
-                .app_error(format!("Failed to write Caddyfile: {e:#}"));
-        }
-        self.sync_log_follower();
-        if restart_services {
-            if self.ollama_proc.is_running() || self.settings.server.manage_server {
-                self.stop_ollama();
-                if self.settings.server.manage_server {
-                    self.start_ollama();
-                }
-            }
-            if self.caddy_proc.is_running() {
-                self.stop_caddy();
-                if self.settings.proxy.enabled {
-                    self.start_caddy();
-                }
-            }
-        }
+        self.ctl.apply(self.draft.clone(), restart_services);
+    }
+
+    /// GPU selection and server options only reach a server this app starts.
+    pub fn gpu_tab_enabled(&self) -> bool {
+        self.draft.server.manage_server
     }
 
     pub fn draft_dirty(&self) -> bool {
-        self.draft != self.settings
-    }
-
-    pub fn sync_log_follower(&mut self) {
-        let l = &self.settings.logs;
-        let key = (l.source, l.file_path.clone(), l.journal_unit.clone());
-        if self.follower_key.as_ref() == Some(&key) {
-            return;
-        }
-        self.follower = match l.source {
-            LogSource::Managed => None,
-            LogSource::File => Some(follow_file(l.file_path.clone(), self.logs.clone())),
-            LogSource::Journal => Some(follow_journal(l.journal_unit.clone(), self.logs.clone())),
-        };
-        self.follower_key = Some(key);
-    }
-
-    // ------------------------------------------------------------------
-    // Process control
-
-    pub fn start_ollama(&mut self) {
-        let (connected, gpus) = {
-            let s = self.backend.shared.lock().unwrap();
-            (s.connected, s.gpus.clone())
-        };
-        if connected && !self.ollama_proc.is_running() {
-            self.logs.app_warn(
-                "Another Ollama server already answers on the configured address. Quit the Ollama tray app / stop the system service first, or the new server will fail to bind.",
-            );
-        }
-        let env = self.settings.ollama_env(&gpus);
-        let path = self.settings.server.ollama_path.clone();
-        if let Err(e) = self.ollama_proc.start(&path, &["serve"], &env, &self.logs) {
-            self.logs.app_error(format!("{e:#}"));
-        }
-        self.backend.refresh_now();
-    }
-
-    fn restart_after_crash(&mut self) {
-        self.crash_restarts
-            .retain(|t| t.elapsed() < Duration::from_secs(60));
-        if self.crash_restarts.len() >= 3 {
-            self.logs.app_error(
-                "Ollama crashed 3 times within a minute; not restarting again. Check the logs, then start it manually.",
-            );
-            return;
-        }
-        self.crash_restarts.push(Instant::now());
-        self.logs.app_warn("Restarting Ollama after a crash");
-        self.start_ollama();
-    }
-
-    pub fn stop_ollama(&mut self) {
-        self.ollama_proc.stop(&self.logs);
-        self.backend.refresh_now();
-    }
-
-    pub fn start_caddy(&mut self) {
-        match caddy::write(&self.settings) {
-            Ok(path) => {
-                let path = path.display().to_string();
-                let program = self.settings.proxy.caddy_path.clone();
-                if let Err(e) = self.caddy_proc.start(
-                    &program,
-                    &["run", "--config", &path, "--adapter", "caddyfile"],
-                    &[],
-                    &self.logs,
-                ) {
-                    self.logs.app_error(format!("{e:#}"));
-                }
-            }
-            Err(e) => self
-                .logs
-                .app_error(format!("Failed to write Caddyfile: {e:#}")),
-        }
-    }
-
-    pub fn stop_caddy(&mut self) {
-        self.caddy_proc.stop(&self.logs);
+        self.draft != self.ctl.settings
     }
 
     // ------------------------------------------------------------------
@@ -338,15 +245,17 @@ impl App {
 
     fn top_bar(&mut self, ui: &mut egui::Ui) {
         let (connected, version, error) = {
-            let s = self.backend.shared.lock().unwrap();
+            let s = self.ctl.backend.shared.lock().unwrap();
             (s.connected, s.version.clone(), s.error.clone())
         };
         ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(ic!(LLAMA, "Ollama Control"))
-                    .size(22.0)
-                    .strong(),
-            );
+            let logo = if self.ctl.settings.ui.dark_mode {
+                &self.logo_dark
+            } else {
+                &self.logo_light
+            };
+            let logo_size = logo.size_vec2() * (30.0 / logo.size_vec2().y);
+            ui.add(egui::Image::new(logo).fit_to_exact_size(logo_size));
             ui.add_space(12.0);
             let r = if connected {
                 kit::badge(
@@ -358,13 +267,13 @@ impl App {
                 kit::badge(ui, "Disconnected", RED)
             };
             let tip = match error {
-                Some(err) => format!("{}\n{err}", self.settings.connection.base_url),
-                None => self.settings.connection.base_url.clone(),
+                Some(err) => format!("{}\n{err}", self.ctl.settings.connection.base_url),
+                None => self.ctl.settings.connection.base_url.clone(),
             };
             r.on_hover_text(tip);
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                let theme_icon = if self.settings.ui.dark_mode {
+                let theme_icon = if self.ctl.settings.ui.dark_mode {
                     icon!(LIGHT)
                 } else {
                     icon!(DARK)
@@ -374,17 +283,17 @@ impl App {
                     .on_hover_text("Toggle theme")
                     .clicked()
                 {
-                    self.settings.ui.dark_mode = !self.settings.ui.dark_mode;
-                    self.draft.ui.dark_mode = self.settings.ui.dark_mode;
-                    apply_theme(ui.ctx(), self.settings.ui.dark_mode);
-                    let _ = self.settings.save();
+                    self.ctl.settings.ui.dark_mode = !self.ctl.settings.ui.dark_mode;
+                    self.draft.ui.dark_mode = self.ctl.settings.ui.dark_mode;
+                    apply_theme(ui.ctx(), self.ctl.settings.ui.dark_mode);
+                    let _ = self.ctl.settings.save();
                 }
                 if ui
                     .button(icon!(REFRESH))
                     .on_hover_text("Refresh now")
                     .clicked()
                 {
-                    self.backend.refresh_now();
+                    self.ctl.backend.refresh_now();
                 }
                 ui.separator();
                 self.proxy_controls(ui);
@@ -395,57 +304,56 @@ impl App {
     }
 
     pub fn server_controls(&mut self, ui: &mut egui::Ui) {
-        if !self.settings.server.manage_server {
+        if !self.ctl.settings.server.manage_server {
             kit::badge(ui, "External server", Color32::GRAY).on_hover_text(
                 "Enable \"Manage server\" in Settings to start/stop Ollama from here.",
             );
             return;
         }
-        if self.ollama_proc.is_running() {
+        if self.ctl.ollama_proc.is_running() {
             if ui.button(ic!(STOP, "Stop")).clicked() {
-                self.stop_ollama();
+                self.ctl.stop_ollama();
             }
             if ui.button(ic!(REGENERATE, "Restart")).clicked() {
-                self.stop_ollama();
-                self.start_ollama();
+                self.ctl.restart_ollama();
             }
             kit::badge(
                 ui,
                 format!(
                     "Server running · pid {}",
-                    self.ollama_proc.pid().unwrap_or(0)
+                    self.ctl.ollama_proc.pid().unwrap_or(0)
                 ),
                 GREEN,
             );
         } else {
             if ui.button(ic!(PLAY, "Start server")).clicked() {
-                self.start_ollama();
+                self.ctl.start_ollama();
             }
             kit::badge(ui, "Server stopped", AMBER);
         }
     }
 
     pub fn proxy_controls(&mut self, ui: &mut egui::Ui) {
-        if !self.settings.proxy.enabled {
+        if !self.ctl.settings.proxy.enabled {
             return;
         }
-        if self.caddy_proc.is_running() {
+        if self.ctl.caddy_proc.is_running() {
             if ui
                 .button(icon!(STOP))
                 .on_hover_text("Stop HTTPS proxy")
                 .clicked()
             {
-                self.stop_caddy();
+                self.ctl.stop_caddy();
             }
             kit::badge(ui, ic!(LOCK, "Proxy on"), GREEN)
-                .on_hover_text(caddy::public_url(&self.settings));
+                .on_hover_text(caddy::public_url(&self.ctl.settings));
         } else {
             if ui
                 .button(icon!(PLAY))
                 .on_hover_text("Start HTTPS proxy")
                 .clicked()
             {
-                self.start_caddy();
+                self.ctl.start_caddy();
             }
             kit::badge(ui, ic!(LOCK_OPEN, "Proxy off"), AMBER);
         }
@@ -454,7 +362,14 @@ impl App {
     fn nav(&mut self, ui: &mut egui::Ui) {
         ui.add_space(10.0);
         for tab in Tab::ALL {
-            if kit::nav_item(ui, self.tab == tab, tab.label()) {
+            let enabled = tab != Tab::Gpu || self.gpu_tab_enabled();
+            let r = ui
+                .add_enabled_ui(enabled, |ui| kit::nav_item(ui, self.tab == tab, tab.label()))
+                .inner
+                .on_disabled_hover_text(
+                    "GPU selection applies to a server started by this app: enable \"Manage the server\" in Settings → Server.",
+                );
+            if r.clicked() {
                 self.tab = tab;
             }
             ui.add_space(2.0);
@@ -464,13 +379,13 @@ impl App {
             if self.draft_dirty() {
                 ui.label(RichText::new("● Unsaved settings").color(AMBER));
             }
-            ui.label(RichText::new(format!("v{}", env!("CARGO_PKG_VERSION"))).weak());
+            ui.label(RichText::new(format!("v{}", include_str!("../VERSION").trim())).weak());
         });
     }
 
     fn toasts(&mut self, ctx: &egui::Context) {
         let notices = {
-            let mut s = self.backend.shared.lock().unwrap();
+            let mut s = self.ctl.backend.shared.lock().unwrap();
             s.notices
                 .retain(|n| n.at.elapsed() < Duration::from_secs(6));
             s.notices.clone()
@@ -495,13 +410,9 @@ impl App {
 
 impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if self.ollama_proc.poll(&self.logs) && self.settings.server.restart_on_crash {
-            self.restart_after_crash();
-        }
-        self.caddy_proc.poll(&self.logs);
-        if self.pending_autostart && self.backend.shared.lock().unwrap().gpus_detected {
-            self.pending_autostart = false;
-            self.start_ollama();
+        self.ctl.tick();
+        if self.tab == Tab::Gpu && !self.gpu_tab_enabled() {
+            self.tab = Tab::Dashboard;
         }
 
         // Live preview of the scale slider; Ctrl +/- zoom still works on top of it.
@@ -530,6 +441,7 @@ impl eframe::App for App {
             .show(ui, |ui| match self.tab {
                 Tab::Logs => self.logs_tab(ui),
                 Tab::Chat => self.chat_tab(ui),
+                Tab::Launcher => self.launcher_tab(ui),
                 Tab::Settings => self.settings_tab(ui),
                 tab => {
                     egui::ScrollArea::vertical()
@@ -539,7 +451,7 @@ impl eframe::App for App {
                             Tab::Models => self.models_tab(ui),
                             Tab::Performance => self.performance_tab(ui),
                             Tab::Gpu => self.gpu_tab(ui),
-                            Tab::Logs | Tab::Chat | Tab::Settings => unreachable!(),
+                            Tab::Logs | Tab::Chat | Tab::Launcher | Tab::Settings => unreachable!(),
                         });
                 }
             });
@@ -547,17 +459,6 @@ impl eframe::App for App {
         self.toasts(&ctx);
         #[cfg(debug_assertions)]
         self.capture_frame(&ctx);
-    }
-}
-
-/// Cleanup lives in `Drop` rather than `App::on_exit`, whose signature depends on the renderer feature.
-impl Drop for App {
-    fn drop(&mut self) {
-        self.backend.shutdown();
-        if self.settings.server.stop_on_exit {
-            self.stop_ollama();
-        }
-        self.stop_caddy();
     }
 }
 

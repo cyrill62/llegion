@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use crate::util::command;
+use crate::util::{Repaint, command};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Level {
@@ -86,7 +86,7 @@ struct LogInner {
     max: usize,
     /// Monotonic counter so the UI can tell when new lines arrived.
     generation: u64,
-    repaint: Option<eframe::egui::Context>,
+    repaint: Option<Repaint>,
 }
 
 impl LogBuffer {
@@ -101,8 +101,8 @@ impl LogBuffer {
         }
     }
 
-    pub fn set_repaint(&self, ctx: eframe::egui::Context) {
-        self.inner.lock().unwrap().repaint = Some(ctx);
+    pub fn set_repaint(&self, repaint: Repaint) {
+        self.inner.lock().unwrap().repaint = Some(repaint);
     }
 
     pub fn set_max(&self, max: usize) {
@@ -131,8 +131,8 @@ impl LogBuffer {
             inner.lines.pop_front();
         }
         inner.generation += 1;
-        if let Some(ctx) = &inner.repaint {
-            ctx.request_repaint_after(Duration::from_millis(100));
+        if let Some(repaint) = &inner.repaint {
+            repaint(Duration::from_millis(100));
         }
     }
 
@@ -167,6 +167,22 @@ impl LogBuffer {
             .filter(|l| filter(l))
             .cloned()
             .collect()
+    }
+}
+
+/// Line filter shared by the log views: enabled origins (ollama, caddy, app),
+/// minimum level and a case-insensitive substring.
+pub fn line_filter(origins: [bool; 3], min: Level, needle: &str) -> impl Fn(&LogLine) -> bool {
+    let needle = needle.to_lowercase();
+    move |l| {
+        let origin_ok = match l.origin {
+            Origin::Ollama => origins[0],
+            Origin::Caddy => origins[1],
+            Origin::App => origins[2],
+        };
+        origin_ok
+            && l.level >= min
+            && (needle.is_empty() || l.text.to_lowercase().contains(&needle))
     }
 }
 

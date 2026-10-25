@@ -2,18 +2,8 @@ use eframe::egui::{self, RichText};
 
 use crate::app::{AMBER, App, GREEN, RED};
 use crate::ollama::RunningModel;
-use crate::util::{format_bytes, format_duration_secs};
+use crate::util::{CONTEXT_PRESETS, ctx_label, format_bytes, format_duration_secs};
 use crate::views::kit;
-
-pub const CONTEXT_PRESETS: [u32; 9] = [2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 0];
-
-pub fn ctx_label(v: u32) -> String {
-    match v {
-        0 => "Auto (server default)".into(),
-        v if v % 1024 == 0 => format!("{}K tokens", v / 1024),
-        v => format!("{v} tokens"),
-    }
-}
 
 /// Context size picker: presets plus free numeric input.
 pub fn context_picker(ui: &mut egui::Ui, id: &str, value: &mut u32) {
@@ -34,7 +24,7 @@ pub fn context_slider(ui: &mut egui::Ui, value: &mut u32) {
         0 => 0,
         v => (v.max(2048).ilog2() - 10).min(10),
     };
-    ui.spacing_mut().slider_width = 260.0;
+    ui.spacing_mut().slider_width = 338.0;
     if ui
         .add(egui::Slider::new(&mut step, 0..=10).show_value(false))
         .changed()
@@ -60,7 +50,7 @@ fn context_drag(value: &mut u32) -> egui::DragValue<'_> {
 
 impl App {
     pub fn running_table(&mut self, ui: &mut egui::Ui, running: &[RunningModel]) {
-        let busy = self.backend.shared.lock().unwrap().busy.clone();
+        let busy = self.ctl.backend.shared.lock().unwrap().busy.clone();
         let now = chrono::Utc::now();
         egui::Grid::new("running")
             .striped(true)
@@ -98,7 +88,7 @@ impl App {
                     if busy.contains(&m.name) {
                         ui.spinner();
                     } else if ui.button(ic!(EJECT, "Unload")).clicked() {
-                        self.backend.unload(&m.name);
+                        self.ctl.backend.unload(&m.name);
                     }
                     ui.end_row();
                 }
@@ -107,7 +97,7 @@ impl App {
 
     pub fn models_tab(&mut self, ui: &mut egui::Ui) {
         let (models, running, pulls, busy, connected) = {
-            let s = self.backend.shared.lock().unwrap();
+            let s = self.ctl.backend.shared.lock().unwrap();
             (
                 s.models.clone(),
                 s.running.clone(),
@@ -174,7 +164,7 @@ impl App {
                     if (ui.button(ic!(DOWNLOAD, "Pull")).clicked() || enter)
                         && !self.pull_name.trim().is_empty()
                     {
-                        self.backend.pull(&self.pull_name);
+                        self.ctl.backend.pull(&self.pull_name);
                         self.pull_name.clear();
                     }
                     ui.hyperlink_to("Browse library", "https://ollama.com/library");
@@ -221,7 +211,7 @@ impl App {
                     });
                 }
                 if !clear.is_empty() {
-                    let mut s = self.backend.shared.lock().unwrap();
+                    let mut s = self.ctl.backend.shared.lock().unwrap();
                     for n in clear {
                         s.pulls.remove(&n);
                     }
@@ -277,15 +267,15 @@ impl App {
                             }
                             if is_running {
                                 if ui.button(ic!(EJECT, "Unload")).clicked() {
-                                    self.backend.unload(&m.name);
+                                    self.ctl.backend.unload(&m.name);
                                 }
                             } else if ui.button(ic!(PLAY, "Load")).clicked() {
                                 let ctx = (self.load_ctx > 0).then_some(self.load_ctx);
-                                self.backend.load(&m.name, ctx);
+                                self.ctl.backend.load(&m.name, ctx);
                             }
                             if ui.button(icon!(INFO)).on_hover_text("Details").clicked() {
                                 self.selected_model = Some(m.name.clone());
-                                self.backend.show(&m.name);
+                                self.ctl.backend.show(&m.name);
                             }
                             if ui.button(icon!(TIMER)).on_hover_text("Benchmark").clicked() {
                                 self.bench_model = m.name.clone();
@@ -321,7 +311,7 @@ impl App {
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
                     if ui.button(RichText::new("Delete").color(RED)).clicked() {
-                        self.backend.delete(&name);
+                        self.ctl.backend.delete(&name);
                         self.confirm_delete = None;
                     }
                     if ui.button("Cancel").clicked() {
@@ -336,6 +326,7 @@ impl App {
             return;
         };
         let detail = self
+            .ctl
             .backend
             .shared
             .lock()

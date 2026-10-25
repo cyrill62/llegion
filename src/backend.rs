@@ -1,16 +1,22 @@
 //! Background polling of the Ollama API / system metrics, plus one-shot tasks.
 
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use eframe::egui;
+use anyhow::Context;
 use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 
+use crate::chat_store::{ChatConfig, ChatStore, ChatSummary, SavedChat, SavedEntry, SavedReply};
+use crate::config;
 use crate::gpu::{self, GpuInfo};
 use crate::logs::LogBuffer;
 use crate::ollama::{ChatMessage, Client, GenerateStats, LocalModel, RunningModel, ShowResponse};
+use crate::util::Repaint;
 
 #[derive(Debug, Clone)]
 pub struct Sample {
@@ -45,8 +51,205 @@ pub struct PullState {
 pub struct BenchRecord {
     pub model: String,
     pub when: String,
+    /// Context size requested for the run (`None` = server default).
     pub num_ctx: Option<u32>,
+    /// Context size the model was actually loaded with, from `/api/ps` after the run.
+    pub loaded_ctx: Option<u64>,
+    /// CPU/GPU split after the run, as `ollama ps` shows it.
+    pub processor: Option<String>,
+    pub server_label: Option<String>,
+    /// `ollama serve` environment when the app manages the server; `None` for an external one.
+    pub server_env: Option<Vec<(String, String)>>,
     pub stats: GenerateStats,
+}
+
+impl BenchRecord {
+    /// Compact summary of the server config the run used, e.g. "ctx 32K · FA · kv q8_0".
+    pub fn server_summary(&self) -> String {
+        if let Some(label) = &self.server_label {
+            return label.clone();
+        }
+        let Some(env) = &self.server_env else {
+            return "external".into();
+        };
+        let get = |k: &str| {
+            env.iter()
+                .find(|(key, _)| key == k)
+                .map(|(_, v)| v.as_str())
+        };
+        let mut parts = Vec::new();
+        if let Some(c) = get("OLLAMA_CONTEXT_LENGTH").and_then(|c| c.parse().ok()) {
+            parts.push(format!("ctx {}", crate::util::ctx_short(c)));
+        }
+        if get("OLLAMA_FLASH_ATTENTION") == Some("1") {
+            parts.push("FA".into());
+        }
+        if let Some(kv) = get("OLLAMA_KV_CACHE_TYPE") {
+            parts.push(format!("kv {kv}"));
+        }
+        if let Some(n) = get("OLLAMA_NUM_PARALLEL") {
+            parts.push(format!("par {n}"));
+        }
+        if get("OLLAMA_VULKAN") == Some("1") {
+            parts.push("Vulkan".into());
+        }
+        if parts.is_empty() {
+            "defaults".into()
+        } else {
+            parts.join(" · ")
+        }
+    }
+
+    /// Full server environment, one `KEY=VALUE` per line.
+    pub fn server_details(&self) -> String {
+        match &self.server_env {
+            None => "Server not managed by this app: its configuration is unknown.".into(),
+            Some(env) if env.is_empty() => "No overrides: server defaults.".into(),
+            Some(env) => env
+                .iter()
+                .map(|(k, v)| format!("{k}={v}"))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        }
+    }
+}
+
+fn csv_field(value: impl std::fmt::Display) -> String {
+    let value = value.to_string();
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+struct BenchLock(PathBuf);
+
+impl Drop for BenchLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
+
+fn benchmark_lock(path: &Path) -> anyhow::Result<BenchLock> {
+    let lock_path = path.with_extension("csv.lock");
+    // shortcut: a crashed process can leave this lock behind; manual removal or an OS lock is needed then.
+    let lock_file = (0..500)
+        .find_map(|_| {
+            match OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
+                Ok(file) => Some(Ok(file)),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    std::thread::sleep(Duration::from_millis(10));
+                    None
+                }
+                Err(e) => Some(Err(e)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| anyhow::anyhow!("timed out waiting for benchmark CSV lock"))?;
+    drop(lock_file);
+    Ok(BenchLock(lock_path))
+}
+
+fn benchmark_path() -> PathBuf {
+    crate::config::data_dir().join("benchmarks.csv")
+}
+
+fn load_benchmarks() -> anyhow::Result<Vec<BenchRecord>> {
+    let path = benchmark_path();
+    fs::create_dir_all(path.parent().unwrap())?;
+    let _lock = benchmark_lock(&path)?;
+    if !path.exists() {
+        return Ok(Vec::new());
+    }
+    let mut reader = csv::Reader::from_path(path)?;
+    let mut benchmarks = Vec::new();
+    for row in reader.records() {
+        let row = row?;
+        let text = |i: usize| row.get(i).unwrap_or_default();
+        let number = |i: usize| -> anyhow::Result<u64> {
+            Ok(text(i)
+                .parse()
+                .with_context(|| format!("invalid CSV field {}", i + 1))?)
+        };
+        let optional = |i: usize| -> anyhow::Result<Option<u64>> {
+            if text(i).is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(number(i)?))
+            }
+        };
+        let timestamp = text(0);
+        let when = chrono::DateTime::parse_from_rfc3339(timestamp)
+            .map(|time| {
+                time.with_timezone(&chrono::Local)
+                    .format("%H:%M:%S")
+                    .to_string()
+            })
+            .unwrap_or_else(|_| timestamp.to_owned());
+        benchmarks.push(BenchRecord {
+            model: text(1).to_owned(),
+            when,
+            num_ctx: optional(2)?.map(|value| value as u32),
+            loaded_ctx: optional(3)?,
+            processor: (!text(4).is_empty()).then(|| text(4).to_owned()),
+            server_label: Some(text(5).to_owned()),
+            server_env: None,
+            stats: GenerateStats {
+                total_duration: number(6)?,
+                load_duration: number(7)?,
+                prompt_eval_count: number(8)?,
+                prompt_eval_duration: number(9)?,
+                eval_count: number(10)?,
+                eval_duration: number(11)?,
+            },
+        });
+    }
+    Ok(benchmarks)
+}
+
+fn save_benchmark(record: &BenchRecord) -> anyhow::Result<()> {
+    let path = benchmark_path();
+    fs::create_dir_all(path.parent().unwrap())?;
+    let _lock = benchmark_lock(&path)?;
+
+    let new_file = !path.exists();
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    if new_file {
+        writeln!(
+            file,
+            "timestamp,model,requested_context,loaded_context,processor,server_config,total_duration_ns,load_duration_ns,prompt_tokens,prompt_duration_ns,generation_tokens,generation_duration_ns,prompt_tokens_per_second,generation_tokens_per_second"
+        )?;
+    }
+    writeln!(
+        file,
+        "{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3}",
+        csv_field(chrono::Local::now().to_rfc3339()),
+        csv_field(&record.model),
+        record.num_ctx.map(|v| v.to_string()).unwrap_or_default(),
+        record.loaded_ctx.map(|v| v.to_string()).unwrap_or_default(),
+        csv_field(record.processor.as_deref().unwrap_or("")),
+        csv_field(record.server_summary()),
+        record.stats.total_duration,
+        record.stats.load_duration,
+        record.stats.prompt_eval_count,
+        record.stats.prompt_eval_duration,
+        record.stats.eval_count,
+        record.stats.eval_duration,
+        record.stats.prompt_tps(),
+        record.stats.gen_tps()
+    )?;
+    Ok(())
+}
+
+fn clear_benchmark_csv() -> anyhow::Result<()> {
+    let path = benchmark_path();
+    fs::create_dir_all(path.parent().unwrap())?;
+    let _lock = benchmark_lock(&path)?;
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
 }
 
 /// One answer from a model. An assistant turn keeps every regenerated variant.
@@ -88,6 +291,53 @@ impl Reply {
         let secs = first.elapsed().as_secs_f64();
         (secs > 0.2 && self.chunks > 1).then(|| (self.chunks - 1) as f64 / secs)
     }
+
+    /// Speed and token counts: final timings when done, an estimate while streaming.
+    pub fn stats_line(&self) -> Option<String> {
+        let ttft = self
+            .first_token
+            .map(|d| format!("first token {:.2}s", d.as_secs_f64()));
+        if let Some(st) = &self.stats {
+            let mut parts = vec![
+                format!("{:.1} tok/s", st.gen_tps()),
+                format!("{} tokens", st.eval_count),
+            ];
+            parts.extend(ttft);
+            parts.push(format!(
+                "prompt {} tokens at {:.0} tok/s",
+                st.prompt_eval_count,
+                st.prompt_tps()
+            ));
+            if st.load_duration > 50_000_000 {
+                parts.push(format!("load {:.2}s", st.load_duration as f64 / 1e9));
+            }
+            parts.push(format!("total {:.2}s", st.total_duration as f64 / 1e9));
+            return Some(parts.join(" · "));
+        }
+        let mut parts = Vec::new();
+        if let Some(tps) = self.live_tps() {
+            parts.push(format!("~{tps:.1} tok/s"));
+        }
+        if self.chunks > 0 {
+            parts.push(format!("{} tokens", self.chunks));
+        }
+        parts.extend(ttft);
+        (!parts.is_empty()).then(|| parts.join(" · "))
+    }
+}
+
+/// `current` if it is still downloaded, else a model already in memory (so the first
+/// answer comes quickly), else the first downloaded one.
+pub fn preferred_model(current: &str, models: &[LocalModel], running: &[RunningModel]) -> String {
+    if models.iter().any(|m| m.name == current) {
+        return current.to_string();
+    }
+    running
+        .iter()
+        .find(|r| models.iter().any(|m| m.name == r.name))
+        .map(|r| r.name.clone())
+        .or_else(|| models.first().map(|m| m.name.clone()))
+        .unwrap_or_default()
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +439,12 @@ pub struct Shared {
     pub benchmarks: Vec<BenchRecord>,
     pub bench_running: bool,
     pub chat: Chat,
+    pub chat_id: String,
+    pub chat_title: Option<String>,
+    pub chat_group: String,
+    pub chat_config: ChatConfig,
+    pub saved_chats: Vec<ChatSummary>,
+    pub chat_storage_error: Option<String>,
     pub notices: Vec<Notice>,
     pub last_poll: Option<Instant>,
 }
@@ -203,37 +459,117 @@ impl Shared {
     }
 }
 
+fn new_chat_id() -> String {
+    let mut bytes = [0; 16];
+    if getrandom::fill(&mut bytes).is_err() {
+        bytes[..8].copy_from_slice(
+            &chrono::Utc::now()
+                .timestamp_nanos_opt()
+                .unwrap_or_default()
+                .to_le_bytes(),
+        );
+        bytes[8..].copy_from_slice(&(std::process::id() as u64).to_le_bytes());
+    }
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn save_entry(entry: &ChatEntry) -> SavedEntry {
+    match entry {
+        ChatEntry::User(text) => SavedEntry::User(text.clone()),
+        ChatEntry::Assistant { variants, selected } => SavedEntry::Assistant {
+            variants: variants
+                .iter()
+                .map(|reply| SavedReply {
+                    model: reply.model.clone(),
+                    content: reply.content.clone(),
+                    thinking: reply.thinking.clone(),
+                    stats: reply.stats.clone(),
+                    error: reply.error.clone(),
+                    stopped: reply.stopped,
+                })
+                .collect(),
+            selected: *selected,
+        },
+    }
+}
+
+fn load_entry(entry: SavedEntry) -> ChatEntry {
+    match entry {
+        SavedEntry::User(text) => ChatEntry::User(text),
+        SavedEntry::Assistant { variants, selected } => ChatEntry::Assistant {
+            selected: selected.min(variants.len().saturating_sub(1)),
+            variants: variants
+                .into_iter()
+                .map(|saved| {
+                    let mut reply = Reply::new(&saved.model);
+                    reply.content = saved.content;
+                    reply.thinking = saved.thinking;
+                    reply.stats = saved.stats;
+                    reply.error = saved.error;
+                    reply.stopped = saved.stopped;
+                    reply.done = true;
+                    reply
+                })
+                .collect(),
+        },
+    }
+}
+
 #[derive(Clone)]
 pub struct Backend {
     pub shared: Arc<Mutex<Shared>>,
     client: Arc<Mutex<Client>>,
-    ctx: egui::Context,
+    repaint: Repaint,
     logs: LogBuffer,
     stop: Arc<AtomicBool>,
     refresh: Arc<AtomicBool>,
     poll_ms: Arc<AtomicU64>,
     history_secs: Arc<AtomicU64>,
     start: Instant,
+    chat_store: Arc<Mutex<Option<ChatStore>>>,
 }
 
 impl Backend {
     pub fn new(
-        ctx: egui::Context,
+        repaint: Repaint,
         client: Client,
         logs: LogBuffer,
         poll_ms: u64,
         history_secs: u64,
     ) -> Self {
+        let mut shared = Shared::default();
+        shared.chat_id = new_chat_id();
+        shared.benchmarks = match load_benchmarks() {
+            Ok(records) => records,
+            Err(e) => {
+                logs.app_error(format!("Failed to load benchmark CSV: {e:#}"));
+                Vec::new()
+            }
+        };
+        let chat_store = match ChatStore::open(config::chat_store_path()) {
+            Ok(store) => {
+                match store.list() {
+                    Ok(chats) => shared.saved_chats = chats,
+                    Err(e) => shared.chat_storage_error = Some(format!("{e:#}")),
+                }
+                Some(store)
+            }
+            Err(e) => {
+                shared.chat_storage_error = Some(format!("{e:#}"));
+                None
+            }
+        };
         let backend = Self {
-            shared: Arc::new(Mutex::new(Shared::default())),
+            shared: Arc::new(Mutex::new(shared)),
             client: Arc::new(Mutex::new(client)),
-            ctx,
+            repaint,
             logs,
             stop: Arc::new(AtomicBool::new(false)),
             refresh: Arc::new(AtomicBool::new(true)),
             poll_ms: Arc::new(AtomicU64::new(poll_ms)),
             history_secs: Arc::new(AtomicU64::new(history_secs)),
             start: Instant::now(),
+            chat_store: Arc::new(Mutex::new(chat_store)),
         };
         backend.redetect_gpus();
         let b = backend.clone();
@@ -256,7 +592,23 @@ impl Backend {
     }
 
     pub fn refresh_now(&self) {
+        match load_benchmarks() {
+            Ok(records) => self.shared.lock().unwrap().benchmarks = records,
+            Err(e) => self
+                .logs
+                .app_error(format!("Failed to reload benchmark CSV: {e:#}")),
+        }
         self.refresh.store(true, Ordering::Relaxed);
+    }
+
+    pub fn clear_benchmarks(&self) {
+        match clear_benchmark_csv() {
+            Ok(()) => self.shared.lock().unwrap().benchmarks.clear(),
+            Err(e) => self
+                .logs
+                .app_error(format!("Failed to clear benchmark CSV: {e:#}")),
+        }
+        (self.repaint)(Duration::ZERO);
     }
 
     pub fn shutdown(&self) {
@@ -269,6 +621,192 @@ impl Backend {
 
     fn client(&self) -> Client {
         self.client.lock().unwrap().clone()
+    }
+
+    pub fn save_current_chat(&self) {
+        let chat = {
+            let s = self.shared.lock().unwrap();
+            let title = s.chat_title.clone().unwrap_or_else(|| {
+                s.chat
+                    .entries
+                    .iter()
+                    .find_map(|entry| match entry {
+                        ChatEntry::User(text) => {
+                            Some(text.trim().chars().take(64).collect::<String>())
+                        }
+                        _ => None,
+                    })
+                    .filter(|title| !title.is_empty())
+                    .unwrap_or_else(|| "New chat".into())
+            });
+            SavedChat {
+                id: s.chat_id.clone(),
+                title,
+                updated: chrono::Local::now().to_rfc3339(),
+                entries: s.chat.entries.iter().map(save_entry).collect(),
+                group: s.chat_group.clone(),
+                config: s.chat_config.clone(),
+            }
+        };
+        let (store, shared, repaint) = (
+            self.chat_store.clone(),
+            self.shared.clone(),
+            self.repaint.clone(),
+        );
+        std::thread::spawn(move || {
+            let result = {
+                let store = store.lock().unwrap();
+                store
+                    .as_ref()
+                    .context("chat database is unavailable")
+                    .and_then(|store| {
+                        store.save(&chat)?;
+                        store.list()
+                    })
+            };
+            let mut s = shared.lock().unwrap();
+            match result {
+                Ok(chats) => {
+                    s.saved_chats = chats;
+                    s.chat_storage_error = None;
+                }
+                Err(e) => s.chat_storage_error = Some(format!("{e:#}")),
+            }
+            drop(s);
+            repaint(Duration::ZERO);
+        });
+    }
+
+    pub fn set_chat_config(&self, config: ChatConfig) {
+        let changed = {
+            let mut s = self.shared.lock().unwrap();
+            if s.chat_config == config {
+                false
+            } else {
+                s.chat_config = config;
+                true
+            }
+        };
+        if changed {
+            self.save_current_chat();
+        }
+    }
+
+    pub fn set_current_chat_group(&self, group: String) {
+        let changed = {
+            let mut s = self.shared.lock().unwrap();
+            if s.chat_group == group {
+                false
+            } else {
+                s.chat_group = group;
+                true
+            }
+        };
+        if changed {
+            self.save_current_chat();
+        }
+    }
+
+    pub fn new_chat(&self) {
+        self.save_current_chat();
+        let mut s = self.shared.lock().unwrap();
+        s.chat.clear();
+        s.chat_id = new_chat_id();
+        s.chat_title = None;
+        s.chat_group.clear();
+        s.chat_config = ChatConfig::default();
+        drop(s);
+        self.save_current_chat();
+        (self.repaint)(Duration::ZERO);
+    }
+
+    pub fn load_saved_chat(&self, id: &str) -> anyhow::Result<()> {
+        let chat = self
+            .chat_store
+            .lock()
+            .unwrap()
+            .as_ref()
+            .context("chat database is unavailable")?
+            .load(id)?;
+        let entries = chat.entries.into_iter().map(load_entry).collect();
+        let mut s = self.shared.lock().unwrap();
+        s.chat.clear();
+        s.chat.entries = entries;
+        s.chat_id = chat.id;
+        s.chat_title = Some(chat.title);
+        s.chat_group = chat.group;
+        s.chat_config = chat.config;
+        drop(s);
+        (self.repaint)(Duration::ZERO);
+        Ok(())
+    }
+
+    pub fn delete_saved_chat(&self, id: &str) -> anyhow::Result<()> {
+        let chats = {
+            let store = self.chat_store.lock().unwrap();
+            let store = store.as_ref().context("chat database is unavailable")?;
+            store.delete(id)?;
+            store.list()?
+        };
+        let mut s = self.shared.lock().unwrap();
+        s.saved_chats = chats;
+        if s.chat_id == id {
+            s.chat.clear();
+            s.chat_id = new_chat_id();
+            s.chat_title = None;
+            s.chat_group.clear();
+            s.chat_config = ChatConfig::default();
+            drop(s);
+            self.save_current_chat();
+            (self.repaint)(Duration::ZERO);
+            return Ok(());
+        }
+        drop(s);
+        (self.repaint)(Duration::ZERO);
+        Ok(())
+    }
+
+    pub fn rename_saved_chat(&self, id: &str, title: String) -> anyhow::Result<()> {
+        let title = title.trim().to_owned();
+        anyhow::ensure!(!title.is_empty(), "chat name cannot be empty");
+        let chats = {
+            let store = self.chat_store.lock().unwrap();
+            let store = store.as_ref().context("chat database is unavailable")?;
+            let mut chat = store.load(id)?;
+            chat.title.clone_from(&title);
+            chat.updated = chrono::Local::now().to_rfc3339();
+            store.save(&chat)?;
+            store.list()?
+        };
+        let mut s = self.shared.lock().unwrap();
+        s.saved_chats = chats;
+        if s.chat_id == id {
+            s.chat_title = Some(title);
+        }
+        drop(s);
+        (self.repaint)(Duration::ZERO);
+        Ok(())
+    }
+
+    pub fn set_saved_chat_group(&self, id: &str, group: String) -> anyhow::Result<()> {
+        let group = group.trim().to_owned();
+        let chats = {
+            let store = self.chat_store.lock().unwrap();
+            let store = store.as_ref().context("chat database is unavailable")?;
+            let mut chat = store.load(id)?;
+            chat.group.clone_from(&group);
+            chat.updated = chrono::Local::now().to_rfc3339();
+            store.save(&chat)?;
+            store.list()?
+        };
+        let mut s = self.shared.lock().unwrap();
+        s.saved_chats = chats;
+        if s.chat_id == id {
+            s.chat_group = group;
+        }
+        drop(s);
+        (self.repaint)(Duration::ZERO);
+        Ok(())
     }
 
     fn poll_loop(&self) {
@@ -371,7 +909,7 @@ impl Backend {
                 }
                 s.last_poll = Some(Instant::now());
             }
-            self.ctx.request_repaint();
+            (self.repaint)(Duration::ZERO);
 
             tick += 1;
             let deadline =
@@ -412,7 +950,7 @@ impl Backend {
             }
             drop(s);
             me.refresh_now();
-            me.ctx.request_repaint();
+            (me.repaint)(Duration::ZERO);
         });
     }
 
@@ -446,7 +984,7 @@ impl Backend {
         std::thread::spawn(move || {
             let res = me.client().show(&m).map_err(|e| format!("{e:#}"));
             me.shared.lock().unwrap().details.insert(m, res);
-            me.ctx.request_repaint();
+            (me.repaint)(Duration::ZERO);
         });
     }
 
@@ -478,7 +1016,7 @@ impl Backend {
                         p.completed = ev.completed;
                     }
                 }
-                me.ctx.request_repaint();
+                (me.repaint)(Duration::ZERO);
                 !cancel.load(Ordering::Relaxed)
             });
             let mut s = me.shared.lock().unwrap();
@@ -501,14 +1039,28 @@ impl Backend {
         });
     }
 
-    pub fn benchmark(&self, model: &str, prompt: &str, num_predict: u32, num_ctx: Option<u32>) {
+    pub fn benchmark(
+        &self,
+        model: &str,
+        prompt: &str,
+        num_predict: u32,
+        num_ctx: Option<u32>,
+        server_env: Option<Vec<(String, String)>>,
+    ) {
         let me = self.clone();
         let (model, prompt) = (model.to_string(), prompt.to_string());
         self.shared.lock().unwrap().bench_running = true;
         std::thread::spawn(move || {
             me.logs
                 .app(format!("Benchmarking {model} ({num_predict} tokens)"));
-            let res = me.client().benchmark(&model, &prompt, num_predict, num_ctx);
+            let client = me.client();
+            let res = client.benchmark(&model, &prompt, num_predict, num_ctx);
+            // The model stays loaded after the run, so `/api/ps` tells what it really got.
+            let loaded = res
+                .is_ok()
+                .then(|| client.running_models().ok())
+                .flatten()
+                .and_then(|r| r.into_iter().find(|r| r.name == model));
             let mut s = me.shared.lock().unwrap();
             s.bench_running = false;
             match res {
@@ -520,18 +1072,27 @@ impl Backend {
                     );
                     me.logs.app(&msg);
                     s.notify(msg, false);
-                    s.benchmarks.push(BenchRecord {
+                    let record = BenchRecord {
                         model,
                         when: chrono::Local::now().format("%H:%M:%S").to_string(),
                         num_ctx,
+                        loaded_ctx: loaded.as_ref().and_then(|r| r.context_length),
+                        processor: loaded.as_ref().map(RunningModel::processor),
+                        server_env,
+                        server_label: None,
                         stats,
-                    });
+                    };
+                    if let Err(e) = save_benchmark(&record) {
+                        me.logs
+                            .app_error(format!("Failed to save benchmark CSV: {e:#}"));
+                    }
+                    s.benchmarks.push(record);
                 }
                 Err(e) => s.notify(format!("Benchmark failed: {e:#}"), true),
             }
             drop(s);
             me.refresh_now();
-            me.ctx.request_repaint();
+            (me.repaint)(Duration::ZERO);
         });
     }
 
@@ -545,6 +1106,7 @@ impl Backend {
             s.chat.entries.push(ChatEntry::User(text));
             s.chat.entries.len()
         };
+        self.save_current_chat();
         self.chat_reply(at, model, opts);
     }
 
@@ -577,6 +1139,7 @@ impl Backend {
         chat.streaming = true;
         let (run, cancel) = (chat.run, chat.cancel.clone());
         drop(s);
+        self.save_current_chat();
 
         let mut options = serde_json::json!({});
         if let Some(t) = opts.temperature {
@@ -606,7 +1169,7 @@ impl Backend {
                     r.thinking.push_str(&chunk.thinking);
                 }
                 drop(s);
-                me.ctx.request_repaint();
+                (me.repaint)(Duration::ZERO);
                 !cancel.load(Ordering::Relaxed)
             });
             let mut s = me.shared.lock().unwrap();
@@ -627,8 +1190,9 @@ impl Backend {
                 }
             }
             drop(s);
+            me.save_current_chat();
             me.refresh_now();
-            me.ctx.request_repaint();
+            (me.repaint)(Duration::ZERO);
         });
     }
 
@@ -651,7 +1215,7 @@ impl Backend {
             s.gpus_detected = true;
             s.history.clear();
             drop(s);
-            me.ctx.request_repaint();
+            (me.repaint)(Duration::ZERO);
         });
     }
 }

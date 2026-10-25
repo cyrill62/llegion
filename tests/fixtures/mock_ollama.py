@@ -9,7 +9,7 @@ MODELS={"llama3.2:3b":2019393189,"qwen3:8b":5225387923,"gemma3:12b":8149190253}
 RUNNING={"llama3.2:3b"}
 # Canned answers for the prompt used by scripts/screenshots.sh; anything else is echoed.
 ANSWERS={
- "llama3.2:3b":"It limits how many tokens the model can see at once: your prompt, the earlier conversation and the reply it is writing. Anything beyond that is dropped, so long chats or documents need a larger window, which also uses more memory.",
+ "llama3.2:3b":"It limits how many **tokens** the model can attend to at once:\n\n- your prompt and the earlier conversation\n- the reply it is still writing\n\nAnything older is dropped, so long chats need a larger window, which costs more memory. Set the default with `OLLAMA_CONTEXT_LENGTH`:\n\n```sh\nOLLAMA_CONTEXT_LENGTH=8192 ollama serve\n```",
  "qwen3:8b":"The context window caps the total number of tokens, input plus output, that the model can attend to in a single request. Once a conversation outgrows it, the oldest messages are truncated and the model no longer remembers them.",
  "gemma3:12b":"It bounds the amount of text, measured in tokens, that fits in the model's working memory for one request. A bigger window lets it follow longer conversations, at the cost of more VRAM and slower prompt processing.",
 }
