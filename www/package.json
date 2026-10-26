@@ -15,7 +15,10 @@
     "vike-react": "^0.6.31"
   },
   "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "@vitejs/plugin-react": "^6.1.2",
+    "daisyui": "^5.7.50",
+    "tailwindcss": "^4.3.3",
     "vite": "^8.3.5"
   }
 }
