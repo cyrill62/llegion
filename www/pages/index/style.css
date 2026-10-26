@@ -1,0 +1,20 @@
+@import 'tailwindcss';
+@plugin 'daisyui' {
+  themes: dark --default;
+}
+
+/* The built-in dark theme, recoloured to match the app's logo. */
+@plugin 'daisyui/theme' {
+  name: 'dark';
+  default: true;
+  --color-base-100: #0e1019;
+  --color-base-200: #171a26;
+  --color-base-300: #2a2e40;
+  --color-base-content: #e6e8f0;
+  --color-primary: #4772fc;
+  --color-primary-content: #ffffff;
+}
+
+body {
+  background: radial-gradient(ellipse at top, #1a2150 0%, var(--color-base-100) 55%) no-repeat, var(--color-base-100);
+}
