@@ -3,7 +3,7 @@
 //! `LLEGION_SCREENSHOTS=<dir>` starts the app with default settings (never the
 //! user's file) against `LLEGION_URL` (default: the mock server on port 11500),
 //! fills the Chat and Performance tabs, saves one PNG per tab into `<dir>` and quits.
-//! `scripts/screenshots.sh` runs it against `tests/fixtures/mock_ollama.py`.
+//! `scripts/screenshots.sh` / `screenshots.ps1` run it against `examples/mock_ollama.rs`.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

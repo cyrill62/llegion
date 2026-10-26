@@ -8,7 +8,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table};
 
 use super::Tui;
 use super::kit::{self, AMBER, GREEN, RED};
-use crate::caddy;
+use crate::ferron;
 use crate::ollama::RunningModel;
 use crate::util::{ctx_short, format_bytes, format_duration_secs};
 
@@ -26,7 +26,7 @@ impl Tui {
         if settings.proxy.enabled {
             hints.push((
                 "P",
-                if self.ctl.caddy_proc.is_running() {
+                if self.ctl.ferron_proc.is_running() {
                     "stop proxy"
                 } else {
                     "start proxy"
@@ -123,14 +123,14 @@ impl Tui {
         let proxy = if !settings.proxy.enabled {
             vec![Line::from(kit::weak("Disabled (Settings → Proxy)."))]
         } else {
-            let state = if self.ctl.caddy_proc.is_running() {
+            let state = if self.ctl.ferron_proc.is_running() {
                 Span::styled("running", Style::new().fg(GREEN))
             } else {
                 Span::styled("stopped", Style::new().fg(AMBER))
             };
             vec![
                 kit::kv("State", state),
-                kit::kv("URL", Span::raw(caddy::public_url(settings))),
+                kit::kv("URL", Span::raw(ferron::public_url(settings))),
                 kit::kv("Tokens", Span::raw(settings.proxy.tokens.len().to_string())),
                 Line::from(kit::weak("P start/stop")),
             ]

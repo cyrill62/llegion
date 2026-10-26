@@ -28,9 +28,9 @@ use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, TableState, Tabs, Wrap};
 use ratatui::{DefaultTerminal, Frame};
 
-use crate::caddy;
 use crate::config::Settings;
 use crate::control::Control;
+use crate::ferron;
 use crate::util::Repaint;
 use input::LineEdit;
 use kit::{AMBER, GREEN, RED};
@@ -308,10 +308,10 @@ impl Tui {
             }
             KeyCode::Char('R') if self.ctl.ollama_proc.is_running() => self.ctl.restart_ollama(),
             KeyCode::Char('P') if self.ctl.settings.proxy.enabled => {
-                if self.ctl.caddy_proc.is_running() {
-                    self.ctl.stop_caddy();
+                if self.ctl.ferron_proc.is_running() {
+                    self.ctl.stop_ferron();
                 } else {
-                    self.ctl.start_caddy();
+                    self.ctl.start_ferron();
                 }
             }
             _ => {}
@@ -590,9 +590,9 @@ impl Tui {
             Span::styled("server stopped  ", Style::new().fg(AMBER))
         });
         if self.ctl.settings.proxy.enabled {
-            spans.push(if self.ctl.caddy_proc.is_running() {
+            spans.push(if self.ctl.ferron_proc.is_running() {
                 Span::styled(
-                    format!("proxy on {}  ", caddy::public_url(&self.ctl.settings)),
+                    format!("proxy on {}  ", ferron::public_url(&self.ctl.settings)),
                     Style::new().fg(GREEN),
                 )
             } else {

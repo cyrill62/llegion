@@ -59,18 +59,19 @@ fn transcript(entries: &[ChatEntry]) -> String {
         .join("\n\n")
 }
 
-fn chat_groups(chats: &[ChatSummary], current: &str) -> Vec<String> {
-    let mut groups: Vec<_> = chats
+/// Subjects created by the user first, then any other subject a chat is filed under.
+fn chat_subjects(created: &[String], chats: &[ChatSummary], current: &str) -> Vec<String> {
+    let mut subjects = created.to_vec();
+    for subject in chats
         .iter()
-        .map(|chat| chat.group.clone())
-        .filter(|group| !group.is_empty())
-        .collect();
-    if !current.is_empty() {
-        groups.push(current.to_owned());
+        .map(|chat| chat.group.as_str())
+        .chain([current])
+    {
+        if !subject.is_empty() && !subjects.iter().any(|s| s == subject) {
+            subjects.push(subject.to_owned());
+        }
     }
-    groups.sort();
-    groups.dedup();
-    groups
+    subjects
 }
 
 impl App {
@@ -122,139 +123,294 @@ impl App {
         }
         self.chat_model = preferred_model(&self.chat_model, &models, &running);
 
-        let groups = chat_groups(&saved_chats, &active_group);
         let mut switched_chat = false;
-        let mut delete_chat = None;
-        ui.horizontal(|ui| {
-            ui.heading("Chat");
-            ui.scope(|ui| {
-                ui.style_mut().always_scroll_the_only_direction = true;
-                egui::ScrollArea::horizontal()
-                    .id_salt("chat_history_tabs")
-                    .show(ui, |ui| {
-                        ui.horizontal(|ui| {
-                            let mut group_order = vec![String::new()];
-                            group_order.extend(groups.iter().cloned());
-                            let found_active = saved_chats.iter().any(|chat| chat.id == active_id);
-                            for group in group_order {
-                                if !group.is_empty() {
-                                    let collapsed = self.collapsed_chat_groups.contains(&group);
-                                    if ui
-                                        .selectable_label(
-                                            !collapsed,
-                                            format!(
-                                                "{} {group}",
-                                                if collapsed { "▸" } else { "▾" }
-                                            ),
-                                        )
-                                        .clicked()
-                                    {
-                                        if collapsed {
-                                            self.collapsed_chat_groups.remove(&group);
-                                        } else {
-                                            self.collapsed_chat_groups.insert(group.clone());
-                                        }
-                                    }
-                                    if collapsed {
-                                        continue;
-                                    }
-                                }
-                                for chat in saved_chats.iter().filter(|chat| chat.group == group) {
-                                    if self.chat_rename_id.as_deref() == Some(&chat.id) {
-                                        let response = ui.add(
-                                            egui::TextEdit::singleline(&mut self.chat_rename_text)
-                                                .desired_width(130.0),
-                                        );
-                                        response.request_focus();
-                                        let commit = response.lost_focus()
-                                            || (response.has_focus()
-                                                && ui.input(|input| {
-                                                    input.key_pressed(egui::Key::Enter)
-                                                }));
-                                        if commit {
-                                            let result = self.ctl.backend.rename_saved_chat(
-                                                &chat.id,
-                                                self.chat_rename_text.clone(),
-                                            );
-                                            if let Err(e) = result {
-                                                self.ctl.logs.app_error(format!(
-                                                    "Failed to rename chat: {e:#}"
-                                                ));
-                                            }
-                                            self.chat_rename_id = None;
-                                        }
-                                    } else {
-                                        let response =
-                                            ui.selectable_label(chat.id == active_id, &chat.title);
-                                        if response.double_clicked() {
-                                            self.chat_rename_id = Some(chat.id.clone());
-                                            self.chat_rename_text.clone_from(&chat.title);
-                                        } else if response.clicked() && chat.id != active_id {
-                                            match self.ctl.backend.load_saved_chat(&chat.id) {
-                                                Ok(()) => switched_chat = true,
-                                                Err(e) => self.ctl.logs.app_error(format!(
-                                                    "Failed to load saved chat: {e:#}"
-                                                )),
-                                            }
-                                        }
-                                    }
-                                    if ui
-                                        .small_button("×")
-                                        .on_hover_text("Close and delete chat")
-                                        .clicked()
-                                    {
-                                        delete_chat = Some(chat.id.clone());
-                                    }
-                                    ui.menu_button("⋯", |ui| {
-                                        ui.label("Move to group");
-                                        if ui.button("Ungroup").clicked()
-                                            && let Err(e) = self
-                                                .ctl
-                                                .backend
-                                                .set_saved_chat_group(&chat.id, String::new())
-                                        {
-                                            self.ctl
-                                                .logs
-                                                .app_error(format!("Failed to move chat: {e:#}"));
-                                        }
-                                        for target in &groups {
-                                            if ui.button(target).clicked()
-                                                && let Err(e) = self
-                                                    .ctl
-                                                    .backend
-                                                    .set_saved_chat_group(&chat.id, target.clone())
-                                            {
-                                                self.ctl.logs.app_error(format!(
-                                                    "Failed to move chat: {e:#}"
-                                                ));
-                                            }
-                                        }
-                                    });
-                                }
-                                if !found_active && group == active_group {
-                                    let _ = ui.selectable_label(true, "New chat");
-                                    if ui
-                                        .small_button("×")
-                                        .on_hover_text("Close and delete chat")
-                                        .clicked()
-                                    {
-                                        delete_chat = Some(active_id.clone());
-                                    }
-                                }
-                            }
-                        });
-                    });
+        let mut open = self.chat_subjects_open;
+        egui::Panel::left("chat_subjects")
+            .resizable(true)
+            .default_size(250.0)
+            .size_range(170.0..=480.0)
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                right: 12,
+                ..Default::default()
+            }))
+            .show_collapsible(ui, &mut open, |ui| {
+                switched_chat =
+                    self.chat_subjects_panel(ui, &saved_chats, &active_id, &active_group);
             });
-            ui.menu_button("+ Group", |ui| {
-                ui.text_edit_singleline(&mut self.chat_group_name);
-                if ui.button("Group current chat").clicked() {
-                    let name = self.chat_group_name.trim().to_owned();
-                    if !name.is_empty() {
-                        self.ctl.backend.set_current_chat_group(name);
+        self.chat_subjects_open = open;
+        egui::CentralPanel::default()
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                left: 12,
+                ..Default::default()
+            }))
+            .show(ui, |ui| {
+                self.chat_main(ui, &entries, streaming, &models, &running, switched_chat)
+            });
+    }
+
+    /// Left panel: chats filed under subjects; drag a chat onto a subject to move it.
+    fn chat_subjects_panel(
+        &mut self,
+        ui: &mut egui::Ui,
+        saved_chats: &[ChatSummary],
+        active_id: &str,
+        active_group: &str,
+    ) -> bool {
+        let subjects = chat_subjects(
+            &self.ctl.settings.ui.chat_subjects,
+            saved_chats,
+            active_group,
+        );
+        let mut switched = false;
+        let mut delete_chat = None;
+        let mut moved: Option<(String, String)> = None;
+        let mut removed_subject = None;
+        ui.horizontal(|ui| {
+            ui.heading("Subjects");
+            ui.menu_button(icon!(ADD), |ui| {
+                let response = ui.add(
+                    egui::TextEdit::singleline(&mut self.chat_subject_name)
+                        .hint_text("Subject name"),
+                );
+                response.request_focus();
+                let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                if ui.button(ic!(ADD, "Create")).clicked() || enter {
+                    let name = self.chat_subject_name.trim().to_owned();
+                    if !name.is_empty() && !subjects.contains(&name) {
+                        let mut created = self.ctl.settings.ui.chat_subjects.clone();
+                        created.push(name);
+                        self.save_chat_subjects(created);
                     }
+                    self.chat_subject_name.clear();
                     ui.close();
                 }
+            })
+            .response
+            .on_hover_text("New subject");
+        });
+        ui.add_space(6.0);
+
+        let found_active = saved_chats.iter().any(|chat| chat.id == active_id);
+        egui::ScrollArea::vertical()
+            .auto_shrink(false)
+            .show(ui, |ui| {
+                // "" holds the chats without a subject, listed last.
+                for subject in subjects.iter().map(String::as_str).chain([""]) {
+                    let chats: Vec<&ChatSummary> = saved_chats
+                        .iter()
+                        .filter(|chat| chat.group == subject)
+                        .collect();
+                    let new_chat_here = !found_active && active_group == subject;
+                    let frame = egui::Frame::new().inner_margin(4.0).corner_radius(6.0);
+                    let (_, dropped) = ui.dnd_drop_zone::<String, ()>(frame, |ui| {
+                        ui.set_width(ui.available_width());
+                        let collapsed =
+                            !subject.is_empty() && self.collapsed_chat_subjects.contains(subject);
+                        ui.horizontal(|ui| {
+                            let title = if subject.is_empty() {
+                                "No subject".to_owned()
+                            } else {
+                                format!("{} {subject}", if collapsed { "▸" } else { "▾" })
+                            };
+                            let header = ui.add(
+                                egui::Button::new(RichText::new(title).strong())
+                                    .frame(false)
+                                    .truncate(),
+                            );
+                            if header.clicked() && !subject.is_empty() {
+                                if collapsed {
+                                    self.collapsed_chat_subjects.remove(subject);
+                                } else {
+                                    self.collapsed_chat_subjects.insert(subject.to_owned());
+                                }
+                            }
+                            if !subject.is_empty() && chats.is_empty() && !new_chat_here {
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        if ui
+                                            .small_button("×")
+                                            .on_hover_text("Remove this empty subject")
+                                            .clicked()
+                                        {
+                                            removed_subject = Some(subject.to_owned());
+                                        }
+                                    },
+                                );
+                            }
+                        });
+                        if collapsed {
+                            return;
+                        }
+                        for chat in &chats {
+                            self.chat_row(
+                                ui,
+                                &chat.id,
+                                &chat.title,
+                                chat.id == active_id,
+                                &mut switched,
+                                &mut delete_chat,
+                            );
+                        }
+                        if new_chat_here {
+                            self.chat_row(
+                                ui,
+                                active_id,
+                                "New chat",
+                                true,
+                                &mut switched,
+                                &mut delete_chat,
+                            );
+                        }
+                        if chats.is_empty() && !new_chat_here {
+                            ui.label(RichText::new("Drop chats here").weak().small());
+                        }
+                    });
+                    if let Some(id) = dropped {
+                        moved = Some((id.as_ref().clone(), subject.to_owned()));
+                    }
+                    ui.add_space(4.0);
+                }
             });
+
+        if let Some((id, subject)) = moved {
+            if id == active_id {
+                self.ctl.backend.set_current_chat_group(subject);
+            } else if let Err(e) = self.ctl.backend.set_saved_chat_group(&id, subject) {
+                self.ctl
+                    .logs
+                    .app_error(format!("Failed to move chat: {e:#}"));
+            }
+        }
+        if let Some(subject) = removed_subject {
+            let mut created = self.ctl.settings.ui.chat_subjects.clone();
+            created.retain(|s| *s != subject);
+            self.save_chat_subjects(created);
+        }
+        if let Some(id) = delete_chat {
+            if id == active_id {
+                switched = true;
+            }
+            if let Err(e) = self.ctl.backend.delete_saved_chat(&id) {
+                self.ctl
+                    .logs
+                    .app_error(format!("Failed to delete chat: {e:#}"));
+            }
+        }
+        switched
+    }
+
+    /// One chat in the subjects panel: click to open, double-click to rename, drag to move.
+    fn chat_row(
+        &mut self,
+        ui: &mut egui::Ui,
+        id: &str,
+        title: &str,
+        active: bool,
+        switched: &mut bool,
+        delete_chat: &mut Option<String>,
+    ) {
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .small_button("×")
+                    .on_hover_text("Close and delete chat")
+                    .clicked()
+                {
+                    *delete_chat = Some(id.to_owned());
+                }
+                if self.chat_rename_id.as_deref() == Some(id) {
+                    let response = ui.add(
+                        egui::TextEdit::singleline(&mut self.chat_rename_text)
+                            .desired_width(ui.available_width()),
+                    );
+                    response.request_focus();
+                    let commit = response.lost_focus()
+                        || (response.has_focus()
+                            && ui.input(|input| input.key_pressed(egui::Key::Enter)));
+                    if commit {
+                        let result = self
+                            .ctl
+                            .backend
+                            .rename_saved_chat(id, self.chat_rename_text.clone());
+                        if let Err(e) = result {
+                            self.ctl
+                                .logs
+                                .app_error(format!("Failed to rename chat: {e:#}"));
+                        }
+                        self.chat_rename_id = None;
+                    }
+                    return;
+                }
+                let response = ui
+                    .add(
+                        egui::Button::selectable(active, title)
+                            .right_text("")
+                            .truncate()
+                            .min_size(egui::vec2(ui.available_width(), 0.0))
+                            // One widget for click and drag: a drag-only layer on top
+                            // (`dnd_drag_source`) would swallow the clicks.
+                            .sense(egui::Sense::click_and_drag()),
+                    )
+                    .on_hover_text(title);
+                response.dnd_set_drag_payload(id.to_owned());
+                if response.dragged() {
+                    ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
+                    if let Some(pos) = ui.ctx().pointer_interact_pos() {
+                        egui::Area::new(egui::Id::unique("chat_drag_preview"))
+                            .order(egui::Order::Tooltip)
+                            .fixed_pos(pos + egui::vec2(12.0, 4.0))
+                            .interactable(false)
+                            .show(ui.ctx(), |ui| {
+                                egui::Frame::popup(ui.style()).show(ui, |ui| ui.label(title));
+                            });
+                    }
+                }
+                if response.double_clicked() {
+                    self.chat_rename_id = Some(id.to_owned());
+                    self.chat_rename_text = title.to_owned();
+                } else if response.clicked() && !active {
+                    match self.ctl.backend.load_saved_chat(id) {
+                        Ok(()) => *switched = true,
+                        Err(e) => self
+                            .ctl
+                            .logs
+                            .app_error(format!("Failed to load saved chat: {e:#}")),
+                    }
+                }
+            });
+        });
+    }
+
+    fn save_chat_subjects(&mut self, subjects: Vec<String>) {
+        self.draft.ui.chat_subjects.clone_from(&subjects);
+        self.ctl.settings.ui.chat_subjects = subjects;
+        if let Err(e) = self.ctl.settings.save() {
+            self.ctl
+                .logs
+                .app_error(format!("Failed to save chat subjects: {e:#}"));
+        }
+    }
+
+    fn chat_main(
+        &mut self,
+        ui: &mut egui::Ui,
+        entries: &[ChatEntry],
+        streaming: bool,
+        models: &[LocalModel],
+        running: &[crate::ollama::RunningModel],
+        mut switched_chat: bool,
+    ) {
+        ui.horizontal(|ui| {
+            let (toggle, tip) = if self.chat_subjects_open {
+                (icon!(PANEL_CLOSE), "Hide subjects")
+            } else {
+                (icon!(PANEL_OPEN), "Show subjects")
+            };
+            if ui.button(toggle).on_hover_text(tip).clicked() {
+                self.chat_subjects_open = !self.chat_subjects_open;
+            }
+            ui.heading("Chat");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui.button(ic!(NEW_CHAT, "New chat")).clicked() {
                     self.ctl.backend.new_chat();
@@ -267,20 +423,10 @@ impl App {
                     )
                     .clicked()
                 {
-                    ui.ctx().copy_text(transcript(&entries));
+                    ui.ctx().copy_text(transcript(entries));
                 }
             });
         });
-        if let Some(id) = delete_chat {
-            if id == active_id {
-                switched_chat = true;
-            }
-            if let Err(e) = self.ctl.backend.delete_saved_chat(&id) {
-                self.ctl
-                    .logs
-                    .app_error(format!("Failed to delete chat: {e:#}"));
-            }
-        }
         ui.add_space(8.0);
 
         kit::panel(ui, ic!(TUNE, "Model & options"), None, |ui| {
@@ -294,7 +440,7 @@ impl App {
                     })
                     .width(300.0)
                     .show_ui(ui, |ui| {
-                        for m in &models {
+                        for m in models {
                             ui.selectable_value(&mut self.chat_model, m.name.clone(), &m.name);
                         }
                     });
@@ -378,14 +524,14 @@ impl App {
                         for (i, entry) in entries.iter().enumerate() {
                             let a = match entry {
                                 ChatEntry::User(text) => {
-                                    user_message(ui, i, text, &models, &self.chat_model, streaming)
+                                    user_message(ui, i, text, models, &self.chat_model, streaming)
                                 }
                                 ChatEntry::Assistant { variants, selected } => assistant_message(
                                     ui,
                                     i,
                                     variants,
                                     *selected,
-                                    &models,
+                                    models,
                                     streaming,
                                     self.chat_markdown.then_some(&mut self.markdown_cache),
                                 ),

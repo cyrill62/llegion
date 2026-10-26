@@ -21,7 +21,7 @@ impl App {
             self.ctl.logs.generation(),
             v.filter.clone(),
             v.min_level,
-            [v.show_ollama, v.show_caddy, v.show_app],
+            [v.show_ollama, v.show_ferron, v.show_app],
         );
         if v.paused || v.cache_key.as_ref() == Some(&key) {
             return;
@@ -79,7 +79,7 @@ impl App {
                         }
                     });
                 ui.toggle_value(&mut self.log_view.show_ollama, "ollama");
-                ui.toggle_value(&mut self.log_view.show_caddy, "caddy");
+                ui.toggle_value(&mut self.log_view.show_ferron, "ferron");
                 ui.toggle_value(&mut self.log_view.show_app, "app");
                 ui.separator();
                 ui.add(

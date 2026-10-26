@@ -2,8 +2,11 @@
 //!
 //! - NVIDIA: `nvidia-smi` (Linux, Windows, WSL)
 //! - AMD / Intel on Linux: `/sys/class/drm` (+ `lspci` for marketing names)
-//! - Windows (non-NVIDIA): display adapter registry keys via PowerShell
+//! - Windows (non-NVIDIA): display adapter registry keys via PowerShell; live usage and
+//!   dedicated VRAM from the GPU performance counters (the ones Task Manager shows)
 //! - macOS: `system_profiler SPDisplaysDataType`
+
+use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
@@ -84,6 +87,11 @@ enum Source {
     Sysfs {
         card_dir: String,
     },
+    /// Windows performance counters; `luid` as written in their instance names.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    WindowsPdh {
+        luid: String,
+    },
     Static,
 }
 
@@ -130,6 +138,8 @@ pub fn sample(gpus: &mut [GpuInfo]) {
             gpu.temperature = hwmon_temp(&dev);
         }
     }
+    #[cfg(windows)]
+    pdh::sample(gpus);
 }
 
 // ---------------------------------------------------------------------------
@@ -384,8 +394,206 @@ fn detect_windows(already: &[GpuInfo]) -> Vec<GpuInfo> {
             WINDOWS_GPU_SCRIPT,
         ],
     )
-    .map(|out| parse_windows_adapters(&out, !already.is_empty()))
+    .map(|out| {
+        let mut gpus = parse_windows_adapters(&out, !already.is_empty());
+        pdh::attach_luids(&mut gpus);
+        gpus
+    })
     .unwrap_or_default()
+}
+
+/// `luid_0x00000000_0x0000c2e5` from `pid_42_luid_0x00000000_0x0000C2E5_phys_0_eng_3_engtype_3D`.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn pdh_luid(instance: &str) -> Option<String> {
+    let at = instance.to_ascii_lowercase().find("luid_")?;
+    instance
+        .get(at..at + 26)
+        .map(|luid| luid.to_ascii_lowercase())
+}
+
+/// Usage per adapter like Task Manager: each engine sums its processes, the adapter
+/// shows its busiest engine.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn engine_utilization(items: &[(String, f64)]) -> HashMap<String, f32> {
+    let mut engines: HashMap<String, f64> = HashMap::new();
+    for (instance, value) in items {
+        let lower = instance.to_ascii_lowercase();
+        if let Some(at) = lower.find("luid_") {
+            *engines.entry(lower[at..].to_string()).or_default() += value;
+        }
+    }
+    let mut adapters: HashMap<String, f32> = HashMap::new();
+    for (engine, value) in engines {
+        if let Some(luid) = pdh_luid(&engine) {
+            let busiest = adapters.entry(luid).or_default();
+            *busiest = busiest.max(value.min(100.0) as f32);
+        }
+    }
+    adapters
+}
+
+/// Dedicated memory in use per adapter, summed over its physical parts.
+#[cfg_attr(not(any(windows, test)), allow(dead_code))]
+fn adapter_memory(items: &[(String, f64)]) -> HashMap<String, u64> {
+    let mut adapters: HashMap<String, u64> = HashMap::new();
+    for (instance, value) in items {
+        if let Some(luid) = pdh_luid(instance) {
+            *adapters.entry(luid).or_default() += *value as u64;
+        }
+    }
+    adapters
+}
+
+#[cfg(windows)]
+mod pdh {
+    use std::sync::Mutex;
+
+    use windows::Win32::Graphics::Dxgi::{
+        CreateDXGIFactory1, DXGI_ADAPTER_FLAG_SOFTWARE, IDXGIFactory1,
+    };
+    use windows::Win32::System::Performance::{
+        PDH_FMT_COUNTERVALUE_ITEM_W, PDH_FMT_DOUBLE, PDH_HCOUNTER, PDH_HQUERY, PDH_MORE_DATA,
+        PdhAddEnglishCounterW, PdhCollectQueryData, PdhGetFormattedCounterArrayW, PdhOpenQueryW,
+    };
+    use windows::core::w;
+
+    use super::{GpuInfo, Source, adapter_memory, engine_utilization};
+
+    /// Links the adapters found by PowerShell to their LUID, which names the counters.
+    pub fn attach_luids(gpus: &mut [GpuInfo]) {
+        let Ok(factory) = (unsafe { CreateDXGIFactory1::<IDXGIFactory1>() }) else {
+            return;
+        };
+        let mut i = 0;
+        while let Ok(adapter) = unsafe { factory.EnumAdapters1(i) } {
+            i += 1;
+            let Ok(desc) = (unsafe { adapter.GetDesc1() }) else {
+                continue;
+            };
+            if desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE.0 as u32 != 0 {
+                continue;
+            }
+            let len = desc.Description.iter().position(|&c| c == 0).unwrap_or(128);
+            let name = String::from_utf16_lossy(&desc.Description[..len]);
+            // Identical cards are matched in enumeration order.
+            if let Some(gpu) = gpus
+                .iter_mut()
+                .find(|g| matches!(g.source, Source::Static) && g.name == name.trim())
+            {
+                gpu.source = Source::WindowsPdh {
+                    luid: format!(
+                        "luid_0x{:08x}_0x{:08x}",
+                        desc.AdapterLuid.HighPart as u32, desc.AdapterLuid.LowPart
+                    ),
+                };
+            }
+        }
+    }
+
+    /// Kept open between samples: usage is a rate between two collections.
+    struct Query {
+        query: PDH_HQUERY,
+        engine: PDH_HCOUNTER,
+        memory: PDH_HCOUNTER,
+    }
+
+    // The handles are only used under the mutex.
+    unsafe impl Send for Query {}
+
+    static QUERY: Mutex<Option<Query>> = Mutex::new(None);
+
+    fn open() -> Option<Query> {
+        let mut q = Query {
+            query: PDH_HQUERY::default(),
+            engine: PDH_HCOUNTER::default(),
+            memory: PDH_HCOUNTER::default(),
+        };
+        unsafe {
+            (PdhOpenQueryW(None, 0, &mut q.query) == 0).then_some(())?;
+            (PdhAddEnglishCounterW(
+                q.query,
+                w!("\\GPU Engine(*)\\Utilization Percentage"),
+                0,
+                &mut q.engine,
+            ) == 0)
+                .then_some(())?;
+            (PdhAddEnglishCounterW(
+                q.query,
+                w!("\\GPU Adapter Memory(*)\\Dedicated Usage"),
+                0,
+                &mut q.memory,
+            ) == 0)
+                .then_some(())?;
+            PdhCollectQueryData(q.query);
+        }
+        Some(q)
+    }
+
+    /// Current value of every instance of a wildcard counter.
+    fn read(counter: PDH_HCOUNTER) -> Option<Vec<(String, f64)>> {
+        let (mut size, mut count) = (0u32, 0u32);
+        unsafe {
+            if PdhGetFormattedCounterArrayW(counter, PDH_FMT_DOUBLE, &mut size, &mut count, None)
+                != PDH_MORE_DATA
+            {
+                return None;
+            }
+            // u64 storage keeps the items aligned.
+            let mut buf = vec![0u64; (size as usize).div_ceil(8)];
+            let items = buf.as_mut_ptr().cast::<PDH_FMT_COUNTERVALUE_ITEM_W>();
+            if PdhGetFormattedCounterArrayW(
+                counter,
+                PDH_FMT_DOUBLE,
+                &mut size,
+                &mut count,
+                Some(items),
+            ) != 0
+            {
+                return None;
+            }
+            Some(
+                std::slice::from_raw_parts(items, count as usize)
+                    .iter()
+                    // PDH_CSTATUS_VALID_DATA / PDH_CSTATUS_NEW_DATA
+                    .filter(|item| item.FmtValue.CStatus <= 1)
+                    .filter_map(|item| {
+                        Some((
+                            item.szName.to_string().ok()?,
+                            item.FmtValue.Anonymous.doubleValue,
+                        ))
+                    })
+                    .collect(),
+            )
+        }
+    }
+
+    pub fn sample(gpus: &mut [GpuInfo]) {
+        if !gpus
+            .iter()
+            .any(|g| matches!(g.source, Source::WindowsPdh { .. }))
+        {
+            return;
+        }
+        let mut query = QUERY.lock().unwrap();
+        if query.is_none() {
+            *query = open();
+        }
+        let Some(q) = query.as_ref() else {
+            return;
+        };
+        if unsafe { PdhCollectQueryData(q.query) } != 0 {
+            return;
+        }
+        let usage = read(q.engine).map(|items| engine_utilization(&items));
+        let memory = read(q.memory).map(|items| adapter_memory(&items));
+        for gpu in gpus.iter_mut() {
+            if let Source::WindowsPdh { luid } = &gpu.source {
+                // An adapter no process is using has no engine instance: it is idle.
+                gpu.utilization = usage.as_ref().map(|u| u.get(luid).copied().unwrap_or(0.0));
+                gpu.vram_used = memory.as_ref().and_then(|m| m.get(luid).copied());
+            }
+        }
+    }
 }
 
 /// Parses the JSON produced by `WINDOWS_GPU_SCRIPT`. NVIDIA entries are skipped when
@@ -587,6 +795,43 @@ mod tests {
         assert_eq!(rows[0].util, Some(7.0));
         assert_eq!(rows[1].util, None);
         assert_eq!(rows[1].uuid, "GPU-3c4d");
+    }
+
+    #[test]
+    fn windows_counters() {
+        let engines = [
+            (
+                "pid_10_luid_0x00000000_0x0000C2E5_phys_0_eng_0_engtype_3D".to_string(),
+                30.0,
+            ),
+            (
+                "pid_11_luid_0x00000000_0x0000C2E5_phys_0_eng_0_engtype_3D".into(),
+                25.0,
+            ),
+            (
+                "pid_11_luid_0x00000000_0x0000C2E5_phys_0_eng_3_engtype_Compute".into(),
+                70.0,
+            ),
+            (
+                "pid_12_luid_0x00000000_0x0000D1B5_phys_0_eng_0_engtype_3D".into(),
+                80.0,
+            ),
+            (
+                "pid_13_luid_0x00000000_0x0000D1B5_phys_0_eng_0_engtype_3D".into(),
+                60.0,
+            ),
+        ];
+        let usage = engine_utilization(&engines);
+        // Busiest engine, its processes summed, capped at 100.
+        assert_eq!(usage["luid_0x00000000_0x0000c2e5"], 70.0);
+        assert_eq!(usage["luid_0x00000000_0x0000d1b5"], 100.0);
+
+        let memory = adapter_memory(&[
+            ("luid_0x00000000_0x0000C2E5_phys_0".to_string(), 1024.0),
+            ("luid_0x00000000_0x0000C2E5_phys_1".into(), 512.0),
+        ]);
+        assert_eq!(memory["luid_0x00000000_0x0000c2e5"], 1536);
+        assert_eq!(pdh_luid("no luid here"), None);
     }
 
     #[test]

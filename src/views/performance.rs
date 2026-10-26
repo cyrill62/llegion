@@ -139,7 +139,7 @@ impl App {
             });
         } else if !has_util && !has_vram {
             kit::panel(ui, "GPU", None, |ui| {
-                ui.label(RichText::new("Live GPU metrics are not available for this GPU/OS (NVIDIA via nvidia-smi and AMD on Linux are supported).").weak());
+                ui.label(RichText::new("Live GPU metrics are not available for this GPU/OS (supported: NVIDIA via nvidia-smi, AMD on Linux, and any GPU on Windows).").weak());
             });
         } else {
             ui.columns(2, |cols| {

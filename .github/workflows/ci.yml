@@ -28,22 +28,22 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --all-features -- -D warnings
       - name: TUI only (no GUI dependencies)
-        run: cargo clippy --all-targets --no-default-features --features tui,rustls -- -D warnings
+        run: cargo clippy --all-targets --no-default-features --features tui,rustls,sqlite -- -D warnings
       - run: cargo test --all-features
       - name: GPU detection on this OS
         run: cargo test detect_and_sample -- --nocapture
 
   e2e:
-    name: end-to-end (managed server + Caddy)
+    name: end-to-end (managed server + Ferron)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: sudo apt-get update && sudo apt-get install -y libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev libxkbcommon-dev
-      - name: Install Caddy
+      - name: Install Ferron
         run: |
-          curl -sSL -o caddy.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.10.2/caddy_2.10.2_linux_amd64.tar.gz
-          mkdir -p "$HOME/bin" && tar -xzf caddy.tar.gz -C "$HOME/bin" caddy
+          curl -sSL -o ferron.zip https://github.com/ferronweb/ferron/releases/download/2.8.1/ferron-2.8.1-x86_64-unknown-linux-gnu.zip
+          mkdir -p "$HOME/bin" && unzip -o ferron.zip ferron -d "$HOME/bin" && chmod +x "$HOME/bin/ferron"
           echo "$HOME/bin" >> "$GITHUB_PATH"
       - run: cargo test e2e -- --ignored

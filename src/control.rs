@@ -1,11 +1,11 @@
 //! UI-independent core shared by both front-ends: settings in effect, the backend
-//! poller, the log buffer and the supervised `ollama serve` / `caddy` processes.
+//! poller, the log buffer and the supervised `ollama serve` / `ferron` processes.
 
 use std::time::{Duration, Instant};
 
 use crate::backend::Backend;
-use crate::caddy;
 use crate::config::{LogSource, Settings};
+use crate::ferron;
 use crate::logs::{Follower, LogBuffer, Origin, follow_file, follow_journal};
 use crate::ollama::Client;
 use crate::process::Managed;
@@ -17,7 +17,7 @@ pub struct Control {
     pub backend: Backend,
     pub logs: LogBuffer,
     pub ollama_proc: Managed,
-    pub caddy_proc: Managed,
+    pub ferron_proc: Managed,
     follower: Option<Follower>,
     follower_key: Option<(LogSource, String, String)>,
     /// Start the server once GPU detection finished (device filters depend on it).
@@ -47,7 +47,7 @@ impl Control {
             backend,
             logs,
             ollama_proc: Managed::new("ollama serve", Origin::Ollama),
-            caddy_proc: Managed::new("caddy", Origin::Caddy),
+            ferron_proc: Managed::new("ferron", Origin::Ferron),
             follower: None,
             follower_key: None,
             pending_autostart: false,
@@ -61,7 +61,7 @@ impl Control {
         self.pending_autostart =
             self.settings.server.manage_server && self.settings.server.auto_start;
         if self.settings.proxy.enabled && self.settings.proxy.auto_start {
-            self.start_caddy();
+            self.start_ferron();
         }
     }
 
@@ -70,7 +70,7 @@ impl Control {
         if self.ollama_proc.poll(&self.logs) && self.settings.server.restart_on_crash {
             self.restart_after_crash();
         }
-        self.caddy_proc.poll(&self.logs);
+        self.ferron_proc.poll(&self.logs);
         if self.pending_autostart && self.backend.shared.lock().unwrap().gpus_detected {
             self.pending_autostart = false;
             self.start_ollama();
@@ -98,10 +98,10 @@ impl Control {
         );
         self.logs.set_max(self.settings.logs.max_lines);
         if self.settings.proxy.enabled
-            && let Err(e) = caddy::write(&self.settings)
+            && let Err(e) = ferron::write(&self.settings)
         {
             self.logs
-                .app_error(format!("Failed to write Caddyfile: {e:#}"));
+                .app_error(format!("Failed to write Ferron configuration: {e:#}"));
         }
         self.sync_log_follower();
         if restart_services {
@@ -111,10 +111,10 @@ impl Control {
                     self.start_ollama();
                 }
             }
-            if self.caddy_proc.is_running() {
-                self.stop_caddy();
+            if self.ferron_proc.is_running() {
+                self.stop_ferron();
                 if self.settings.proxy.enabled {
-                    self.start_caddy();
+                    self.start_ferron();
                 }
             }
         }
@@ -179,28 +179,26 @@ impl Control {
         self.start_ollama();
     }
 
-    pub fn start_caddy(&mut self) {
-        match caddy::write(&self.settings) {
+    pub fn start_ferron(&mut self) {
+        match ferron::write(&self.settings) {
             Ok(path) => {
                 let path = path.display().to_string();
-                let program = self.settings.proxy.caddy_path.clone();
-                if let Err(e) = self.caddy_proc.start(
-                    &program,
-                    &["run", "--config", &path, "--adapter", "caddyfile"],
-                    &[],
-                    &self.logs,
-                ) {
+                let program = self.settings.proxy.ferron_path.clone();
+                if let Err(e) =
+                    self.ferron_proc
+                        .start(&program, &["--config", &path], &[], &self.logs)
+                {
                     self.logs.app_error(format!("{e:#}"));
                 }
             }
             Err(e) => self
                 .logs
-                .app_error(format!("Failed to write Caddyfile: {e:#}")),
+                .app_error(format!("Failed to write Ferron configuration: {e:#}")),
         }
     }
 
-    pub fn stop_caddy(&mut self) {
-        self.caddy_proc.stop(&self.logs);
+    pub fn stop_ferron(&mut self) {
+        self.ferron_proc.stop(&self.logs);
     }
 
     /// Environment of the managed server for benchmark records, `None` for an external one.
@@ -222,6 +220,6 @@ impl Drop for Control {
         if self.settings.server.stop_on_exit {
             self.stop_ollama();
         }
-        self.stop_caddy();
+        self.stop_ferron();
     }
 }

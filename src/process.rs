@@ -1,4 +1,4 @@
-//! Lifecycle of child processes owned by the app (`ollama serve`, `caddy run`).
+//! Lifecycle of child processes owned by the app (`ollama serve`, `ferron`).
 
 use std::process::{Child, Stdio};
 use std::time::Instant;
@@ -150,7 +150,7 @@ mod tests {
     #[test]
     fn stop_kills_the_child() {
         let logs = LogBuffer::new(1000);
-        let mut p = Managed::new("sleeper", Origin::Caddy);
+        let mut p = Managed::new("sleeper", Origin::Ferron);
         p.start("sleep", &["30"], &[], &logs).unwrap();
         p.stop(&logs);
         assert!(!p.is_running());

@@ -16,8 +16,9 @@ info() { echo "==> $*"; }
 command -v gh >/dev/null 2>&1 || die "gh not found — install it from https://cli.github.com"
 VERSION=$(tr -d '[:space:]' < VERSION)
 [ -n "$VERSION" ] || die "VERSION is empty"
-VERSION=${VERSION#v}
-TAG="$(git config gitflow.prefix.versiontag || echo v)$VERSION"
+# An empty git-flow prefix (git flow init's default) still means "v": release.yml only runs on v* tags.
+PREFIX=$(git config gitflow.prefix.versiontag || true)
+TAG="${PREFIX:-v}$VERSION"
 MAIN=$(git config gitflow.branch.master || echo main)
 DEVELOP=$(git config gitflow.branch.develop || echo develop)
 

@@ -54,7 +54,7 @@ impl Level {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Origin {
     Ollama,
-    Caddy,
+    Ferron,
     App,
 }
 
@@ -62,7 +62,7 @@ impl Origin {
     pub fn label(self) -> &'static str {
         match self {
             Origin::Ollama => "ollama",
-            Origin::Caddy => "caddy",
+            Origin::Ferron => "ferron",
             Origin::App => "app",
         }
     }
@@ -170,14 +170,14 @@ impl LogBuffer {
     }
 }
 
-/// Line filter shared by the log views: enabled origins (ollama, caddy, app),
+/// Line filter shared by the log views: enabled origins (ollama, ferron, app),
 /// minimum level and a case-insensitive substring.
 pub fn line_filter(origins: [bool; 3], min: Level, needle: &str) -> impl Fn(&LogLine) -> bool {
     let needle = needle.to_lowercase();
     move |l| {
         let origin_ok = match l.origin {
             Origin::Ollama => origins[0],
-            Origin::Caddy => origins[1],
+            Origin::Ferron => origins[1],
             Origin::App => origins[2],
         };
         origin_ok

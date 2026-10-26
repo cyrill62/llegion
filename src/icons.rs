@@ -147,6 +147,12 @@ macro_rules! icon {
     (NEW_CHAT) => {
         "\u{e266}"
     };
+    (PANEL_CLOSE) => {
+        "\u{f717}"
+    };
+    (PANEL_OPEN) => {
+        "\u{f716}"
+    };
 }
 
 /// `ic!(SAVE, "Save")` → icon followed by a label.

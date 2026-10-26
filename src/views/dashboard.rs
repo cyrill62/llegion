@@ -1,7 +1,7 @@
 use eframe::egui::{self, Color32, RichText};
 
 use crate::app::{AMBER, App, GREEN, RED};
-use crate::caddy;
+use crate::ferron;
 use crate::gpu::GpuInfo;
 use crate::util::{format_bytes, format_duration_secs};
 use crate::views::kit;
@@ -100,7 +100,7 @@ impl App {
                 kit::kv_grid(ui, "dash_net", |ui| {
                     ui.label("HTTPS proxy");
                     if self.ctl.settings.proxy.enabled {
-                        let (text, color) = if self.ctl.caddy_proc.is_running() {
+                        let (text, color) = if self.ctl.ferron_proc.is_running() {
                             ("Running", GREEN)
                         } else {
                             ("Stopped", AMBER)
@@ -114,7 +114,7 @@ impl App {
                         ui.label("Public URL");
                         ui.add(
                             egui::Label::new(
-                                RichText::new(caddy::public_url(&self.ctl.settings)).monospace(),
+                                RichText::new(ferron::public_url(&self.ctl.settings)).monospace(),
                             )
                             .wrap(),
                         );

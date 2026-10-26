@@ -3,8 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::app::{AMBER, App, GREEN, RED};
-use crate::caddy;
 use crate::config::{ApiToken, LogSource, Settings, TlsMode, service_env_snippet};
+use crate::ferron;
 use crate::ollama::Client;
 use crate::util::{generate_token, mask_token};
 use crate::views::kit::{self, choice, panel, setting, switch};
@@ -14,19 +14,17 @@ pub enum SettingsPane {
     Connection,
     Server,
     Memory,
-    Proxy,
-    Tokens,
+    Security,
     Logs,
     Application,
 }
 
 impl SettingsPane {
-    const ALL: [SettingsPane; 7] = [
+    const ALL: [SettingsPane; 6] = [
         SettingsPane::Connection,
         SettingsPane::Server,
         SettingsPane::Memory,
-        SettingsPane::Proxy,
-        SettingsPane::Tokens,
+        SettingsPane::Security,
         SettingsPane::Logs,
         SettingsPane::Application,
     ];
@@ -36,8 +34,7 @@ impl SettingsPane {
             SettingsPane::Connection => ic!(CABLE, "Connection"),
             SettingsPane::Server => ic!(SERVER, "Server"),
             SettingsPane::Memory => ic!(GPU, "Models & memory"),
-            SettingsPane::Proxy => ic!(LOCK, "HTTPS proxy"),
-            SettingsPane::Tokens => ic!(KEY, "API tokens"),
+            SettingsPane::Security => ic!(LOCK, "Security"),
             SettingsPane::Logs => ic!(LOGS, "Logs"),
             SettingsPane::Application => ic!(PALETTE, "Application"),
         }
@@ -157,8 +154,7 @@ impl App {
                         SettingsPane::Connection => self.connection_pane(ui),
                         SettingsPane::Server => self.server_pane(ui),
                         SettingsPane::Memory => self.memory_pane(ui),
-                        SettingsPane::Proxy => self.managed_only(ui, Self::proxy_pane),
-                        SettingsPane::Tokens => self.managed_only(ui, Self::tokens_pane),
+                        SettingsPane::Security => self.managed_only(ui, Self::security_pane),
                         SettingsPane::Logs => self.logs_pane(ui),
                         SettingsPane::Application => self.app_pane(ui),
                     });
@@ -193,7 +189,7 @@ impl App {
                 setting(
                     ui,
                     "Self-signed certificates",
-                    Some("Accept Caddy's internal CA"),
+                    Some("Accept the proxy's self-signed certificate"),
                     |ui| switch(ui, &mut c.accept_invalid_certs, ""),
                 );
             },
@@ -216,7 +212,7 @@ impl App {
                     .inner
                     .on_disabled_hover_text("Enable the proxy first");
                 if proxy.clicked() {
-                    self.draft.connection.base_url = caddy::public_url(&self.draft);
+                    self.draft.connection.base_url = ferron::public_url(&self.draft);
                     self.draft.connection.accept_invalid_certs =
                         self.draft.proxy.tls == TlsMode::Internal;
                     if let Some(t) = self.draft.proxy.tokens.first() {
@@ -457,10 +453,16 @@ impl App {
         });
     }
 
+    /// HTTPS proxy and the API tokens it checks.
+    fn security_pane(&mut self, ui: &mut egui::Ui) {
+        self.proxy_pane(ui);
+        self.tokens_pane(ui);
+    }
+
     fn proxy_pane(&mut self, ui: &mut egui::Ui) {
         panel(
             ui,
-            ic!(LOCK, "Caddy reverse proxy"),
+            ic!(LOCK, "Ferron reverse proxy"),
             Some("Adds HTTPS and token checks in front of Ollama, which has no authentication."),
             |ui| {
                 let p = &mut self.draft.proxy;
@@ -470,11 +472,11 @@ impl App {
                 ui.add_enabled_ui(p.enabled, |ui| {
                     setting(
                         ui,
-                        "caddy binary",
+                        "ferron binary",
                         Some("Name in PATH or full path"),
                         |ui| {
-                            text(ui, &mut p.caddy_path, "caddy");
-                            ui.hyperlink_to("Get Caddy", "https://caddyserver.com/download");
+                            text(ui, &mut p.ferron_path, "ferron");
+                            ui.hyperlink_to("Get Ferron", "https://ferron.sh/download");
                         },
                     );
                     setting(ui, "Start with the app", None, |ui| {
@@ -502,6 +504,7 @@ impl App {
         );
 
         let enabled = self.draft.proxy.enabled;
+        let self_signed = ferron::self_signed_paths(&self.draft).0;
         ui.add_enabled_ui(enabled, |ui| {
             panel(ui, ic!(KEY, "TLS certificate"), None, |ui| {
                 let p = &mut self.draft.proxy;
@@ -519,9 +522,10 @@ impl App {
                 match p.tls {
                     TlsMode::Internal => {
                         ui.label(
-                            RichText::new(
-                                "Run `caddy trust` on clients, or accept the certificate.",
-                            )
+                            RichText::new(format!(
+                                "Trust {} on clients, or accept the certificate.",
+                                self_signed.display()
+                            ))
                             .weak(),
                         );
                     }
@@ -558,7 +562,7 @@ impl App {
         });
 
         if enabled {
-            let url = caddy::public_url(&self.draft);
+            let url = ferron::public_url(&self.draft);
             panel(ui, ic!(TEST, "Status & test"), None, |ui| {
                 setting(ui, "Public URL", None, |ui| {
                     ui.label(RichText::new(&url).monospace().strong());
@@ -591,10 +595,10 @@ impl App {
 
             panel(
                 ui,
-                ic!(LOGS, "Generated Caddyfile"),
-                Some(&format!("Written to {}", caddy::caddyfile_path().display())),
+                ic!(LOGS, "Generated Ferron configuration"),
+                Some(&format!("Written to {}", ferron::config_path().display())),
                 |ui| {
-                    let mut content = caddy::generate(&self.draft);
+                    let mut content = ferron::generate(&self.draft);
                     if !self.reveal_tokens {
                         for t in &self.draft.proxy.tokens {
                             if !t.token.is_empty() {

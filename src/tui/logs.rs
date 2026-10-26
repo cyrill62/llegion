@@ -17,7 +17,7 @@ const LEVELS: [Level; 4] = [Level::Debug, Level::Info, Level::Warn, Level::Error
 pub(super) struct State {
     pub filter: String,
     pub min_level: Level,
-    /// Shown origins: ollama, caddy, app.
+    /// Shown origins: ollama, ferron, app.
     pub origins: [bool; 3],
     pub paused: bool,
     /// Lines scrolled up from the newest (0 follows new lines).
@@ -89,7 +89,7 @@ impl Tui {
                 v.min_level = kit::cycle(&LEVELS, &v.min_level, k.code == KeyCode::Char('V'))
             }
             KeyCode::Char('o') => v.origins[0] = !v.origins[0],
-            KeyCode::Char('c') => v.origins[1] = !v.origins[1],
+            KeyCode::Char('f') => v.origins[1] = !v.origins[1],
             KeyCode::Char('a') => v.origins[2] = !v.origins[2],
             KeyCode::Char('p') => v.paused = !v.paused,
             KeyCode::Char('x') => self.ctl.logs.clear(),
@@ -114,7 +114,7 @@ impl Tui {
         vec![
             ("/", "filter"),
             ("v", "level"),
-            ("o c a", "ollama/caddy/app"),
+            ("o f a", "ollama/ferron/app"),
             ("s", "source"),
             ("p", if self.logs.paused { "resume" } else { "pause" }),
             ("x", "clear"),
@@ -146,7 +146,7 @@ impl Tui {
             kit::weak("level ≥ "),
             Span::raw(format!("{}  ", v.min_level.label())),
             toggle("ollama", v.origins[0]),
-            toggle("caddy", v.origins[1]),
+            toggle("ferron", v.origins[1]),
             toggle("app", v.origins[2]),
         ];
         if !v.filter.is_empty() {
@@ -172,7 +172,7 @@ impl Tui {
                 let (origin_color, level_style) = (
                     match l.origin {
                         Origin::Ollama => Color::Cyan,
-                        Origin::Caddy => Color::Magenta,
+                        Origin::Ferron => Color::Magenta,
                         Origin::App => Color::Blue,
                     },
                     match l.level {

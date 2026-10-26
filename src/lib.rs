@@ -6,10 +6,10 @@
 mod icons;
 
 pub mod backend;
-pub mod caddy;
 pub mod chat_store;
 pub mod config;
 pub mod control;
+pub mod ferron;
 pub mod gpu;
 pub mod logs;
 pub mod ollama;

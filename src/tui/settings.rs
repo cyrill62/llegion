@@ -213,7 +213,7 @@ fn items() -> Vec<Item> {
         item(
             "Proxy",
             "Enabled",
-            "Caddy in front of Ollama with HTTPS and bearer-token auth (P key).",
+            "Ferron in front of Ollama with HTTPS and bearer-token auth (P key).",
             Kind::Bool(|s| &mut s.proxy.enabled),
         ),
         item(
@@ -224,9 +224,9 @@ fn items() -> Vec<Item> {
         ),
         item(
             "Proxy",
-            "caddy binary",
+            "ferron binary",
             "",
-            Kind::Text(|s| &mut s.proxy.caddy_path),
+            Kind::Text(|s| &mut s.proxy.ferron_path),
         ),
         item(
             "Proxy",

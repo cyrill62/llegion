@@ -84,7 +84,8 @@ esac
 [[ "$NEW" =~ $SEMVER ]] || die "'$NEW' is not a semantic version (X.Y.Z)"
 [ "$NEW" != "$CURRENT" ] || die "version is already $NEW"
 
-TAG_PREFIX=$(git config gitflow.prefix.versiontag || echo v)
+TAG_PREFIX=$(git config gitflow.prefix.versiontag || true)
+TAG_PREFIX=${TAG_PREFIX:-v} # empty (git flow init's default) still means "v"
 info "bumping $CURRENT -> $NEW"
 
 if [ -z "$DESC" ]; then

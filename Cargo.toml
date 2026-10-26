@@ -1,6 +1,6 @@
 [package]
 name = "llegion"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024"
 license = "MIT"
 description = "Cross-platform control panel for Ollama, as a desktop app and a terminal UI"
@@ -35,6 +35,7 @@ egui_plot = { version = "0.38.0", optional = true }
 getrandom = "0.4.3"
 # Debug-only screenshot capture; already in the tree through eframe's image loading.
 png = { version = "0.18.1", optional = true }
+rcgen = { version = "0.14.10", optional = true }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
 ratatui = { version = "0.30.2", default-features = false, features = ["crossterm", "layout-cache", "unstable-rendered-line-info"], optional = true }
@@ -43,6 +44,10 @@ rusqlite = { version = "0.32.1", features = ["bundled"], optional = true }
 sysinfo = "0.39.6"
 toml = "1.1.8"
 ureq = { version = "3.5.0", default-features = false, features = ["json", "gzip"] }
+
+[target.'cfg(windows)'.dependencies]
+# GPU usage and VRAM from the system's performance counters (already in the tree through sysinfo).
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi", "Win32_System_Performance"] }
 
 [profile.release]
 strip = true
@@ -54,7 +59,7 @@ default = ["rustls", "gui", "tui", "sqlite"]
 gui = ["dep:eframe", "dep:egui", "dep:egui_commonmark", "dep:egui_material_icons", "dep:egui_plot", "dep:png"]
 # Terminal UI: the `llegion-tui` binary (no graphics stack needed).
 tui = ["dep:ratatui"]
-# TLS backend for talking to an HTTPS proxy / remote server.
-rustls = ["ureq/rustls"]
+# TLS: talking to an HTTPS proxy / remote server, and the proxy's self-signed certificate.
+rustls = ["ureq/rustls", "dep:rcgen"]
 sqlite = ["dep:rusqlite"]
 rocksdb = ["dep:rocksdb", "dep:fs4"]

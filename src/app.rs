@@ -1,12 +1,12 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use eframe::egui::{self, Color32, RichText};
 
-use crate::caddy;
 use crate::config::Settings;
 use crate::control::Control;
+use crate::ferron;
 use crate::logs::{Level, LogLine};
 use crate::util::Repaint;
 use crate::views::kit;
@@ -16,7 +16,8 @@ pub const GREEN: Color32 = Color32::from_rgb(80, 200, 120);
 pub const RED: Color32 = Color32::from_rgb(230, 90, 80);
 pub const AMBER: Color32 = Color32::from_rgb(235, 175, 60);
 
-fn load_logo(ctx: &egui::Context, bytes: &[u8], name: &str) -> egui::TextureHandle {
+/// Decodes an embedded 8-bit RGBA PNG into a texture.
+pub(crate) fn load_logo(ctx: &egui::Context, bytes: &[u8], name: &str) -> egui::TextureHandle {
     let decoder = png::Decoder::new(std::io::Cursor::new(bytes));
     let mut reader = decoder.read_info().expect("embedded logo PNG");
     let mut pixels = vec![0; reader.output_buffer_size().expect("logo dimensions")];
@@ -76,7 +77,7 @@ pub struct LogView {
     pub filter: String,
     pub min_level: Level,
     pub show_ollama: bool,
-    pub show_caddy: bool,
+    pub show_ferron: bool,
     pub show_app: bool,
     pub autoscroll: bool,
     pub paused: bool,
@@ -111,8 +112,11 @@ pub struct App {
     pub chat_active_id: String,
     pub chat_rename_id: Option<String>,
     pub chat_rename_text: String,
-    pub chat_group_name: String,
-    pub collapsed_chat_groups: HashSet<String>,
+    pub chat_subject_name: String,
+    pub collapsed_chat_subjects: HashSet<String>,
+    pub chat_subjects_open: bool,
+    /// Main navigation shows labels; when off it shrinks to icons.
+    pub nav_open: bool,
     pub chat_model: String,
     pub chat_input: String,
     pub chat_system: String,
@@ -121,6 +125,8 @@ pub struct App {
     pub chat_temperature: Option<f32>,
     pub chat_markdown: bool,
     pub launcher_selected: String,
+    /// Agent icons by (key, dark theme), decoded on first use.
+    pub launcher_icons: HashMap<(&'static str, bool), egui::TextureHandle>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
 
     pub log_view: LogView,
@@ -183,8 +189,10 @@ impl App {
             chat_active_id: String::new(),
             chat_rename_id: None,
             chat_rename_text: String::new(),
-            chat_group_name: String::new(),
-            collapsed_chat_groups: HashSet::new(),
+            chat_subject_name: String::new(),
+            collapsed_chat_subjects: HashSet::new(),
+            chat_subjects_open: true,
+            nav_open: true,
             chat_model: String::new(),
             chat_input: String::new(),
             chat_system: String::new(),
@@ -192,12 +200,13 @@ impl App {
             chat_temperature: None,
             chat_markdown: true,
             launcher_selected: "claude".into(),
+            launcher_icons: HashMap::new(),
             markdown_cache: Default::default(),
             log_view: LogView {
                 filter: String::new(),
                 min_level: Level::Debug,
                 show_ollama: true,
-                show_caddy: true,
+                show_ferron: true,
                 show_app: true,
                 autoscroll: true,
                 paused: false,
@@ -337,36 +346,54 @@ impl App {
         if !self.ctl.settings.proxy.enabled {
             return;
         }
-        if self.ctl.caddy_proc.is_running() {
+        if self.ctl.ferron_proc.is_running() {
             if ui
                 .button(icon!(STOP))
                 .on_hover_text("Stop HTTPS proxy")
                 .clicked()
             {
-                self.ctl.stop_caddy();
+                self.ctl.stop_ferron();
             }
             kit::badge(ui, ic!(LOCK, "Proxy on"), GREEN)
-                .on_hover_text(caddy::public_url(&self.ctl.settings));
+                .on_hover_text(ferron::public_url(&self.ctl.settings));
         } else {
             if ui
                 .button(icon!(PLAY))
                 .on_hover_text("Start HTTPS proxy")
                 .clicked()
             {
-                self.ctl.start_caddy();
+                self.ctl.start_ferron();
             }
             kit::badge(ui, ic!(LOCK_OPEN, "Proxy off"), AMBER);
         }
     }
 
     fn nav(&mut self, ui: &mut egui::Ui) {
-        ui.add_space(10.0);
+        let (toggle, tip) = if self.nav_open {
+            (icon!(PANEL_CLOSE), "Shrink the menu")
+        } else {
+            (icon!(PANEL_OPEN), "Expand the menu")
+        };
+        if ui.button(toggle).on_hover_text(tip).clicked() {
+            self.nav_open = !self.nav_open;
+        }
+        ui.add_space(6.0);
         for tab in Tab::ALL {
             let enabled = tab != Tab::Gpu || self.gpu_tab_enabled();
-            let r = ui
-                .add_enabled_ui(enabled, |ui| kit::nav_item(ui, self.tab == tab, tab.label()))
-                .inner
-                .on_disabled_hover_text(
+            let label = tab.label();
+            // Labels start with their icon; a shrunk menu keeps only that.
+            let shown = if self.nav_open {
+                label
+            } else {
+                label.split("  ").next().unwrap_or(label)
+            };
+            let mut r = ui
+                .add_enabled_ui(enabled, |ui| kit::nav_item(ui, self.tab == tab, shown))
+                .inner;
+            if !self.nav_open {
+                r = r.on_hover_text(label);
+            }
+            let r = r.on_disabled_hover_text(
                     "GPU selection applies to a server started by this app: enable \"Manage the server\" in Settings → Server.",
                 );
             if r.clicked() {
@@ -377,9 +404,19 @@ impl App {
         ui.with_layout(egui::Layout::bottom_up(egui::Align::Min), |ui| {
             ui.add_space(6.0);
             if self.draft_dirty() {
-                ui.label(RichText::new("● Unsaved settings").color(AMBER));
+                ui.label(
+                    RichText::new(if self.nav_open {
+                        "● Unsaved settings"
+                    } else {
+                        "●"
+                    })
+                    .color(AMBER),
+                )
+                .on_hover_text("Unsaved settings");
             }
-            ui.label(RichText::new(format!("v{}", include_str!("../VERSION").trim())).weak());
+            if self.nav_open {
+                ui.label(RichText::new(format!("v{}", include_str!("../VERSION").trim())).weak());
+            }
         });
     }
 
@@ -430,7 +467,7 @@ impl eframe::App for App {
             .show(ui, |ui| self.top_bar(ui));
         egui::Panel::left("nav")
             .resizable(false)
-            .exact_size(220.0)
+            .exact_size(if self.nav_open { 220.0 } else { 64.0 })
             .frame(
                 egui::Frame::side_top_panel(ui.style())
                     .inner_margin(egui::Margin::symmetric(10, 8)),

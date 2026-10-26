@@ -30,7 +30,7 @@ cargo run
 You can develop without a real Ollama by running the mock server used by the end-to-end test, then setting Settings → Connection to `http://127.0.0.1:11500`:
 
 ```sh
-python3 tests/fixtures/mock_ollama.py 11500
+cargo run --example mock_ollama -- 11500
 ```
 
 ## Before opening a pull request
@@ -43,7 +43,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 ```
 
-If you touched the managed server, the process supervisor or the Caddy proxy, also run the end-to-end test (needs `python3` and `caddy`):
+If you touched the managed server, the process supervisor or the Ferron proxy, also run the end-to-end test (needs `ferron`; the mock server is built by `cargo test`):
 
 ```sh
 cargo test e2e -- --ignored
@@ -66,7 +66,11 @@ The README pictures in `docs/screenshots/` come from a capture mode that exists 
 scripts/screenshots.sh
 ```
 
-It starts the mock server, runs the app with `LLEGION_SCREENSHOTS=docs/screenshots` (default settings, never your own), fills the Chat and Performance tabs, saves one PNG per tab and quits. Set `LLEGION_URL` to capture against a real server instead. On WSLg the window is sometimes dropped at startup ("Connection reset by peer"); run it again.
+```powershell
+.\scripts\screenshots.ps1        # Windows
+```
+
+It starts the mock server, runs the app with `LLEGION_SCREENSHOTS=docs/screenshots` (default settings, never your own), fills the Chat and Performance tabs, saves one PNG per tab and quits. Set `LLEGION_URL` to capture against a real server instead. On WSLg the window is sometimes dropped at startup ("Connection reset by peer"); run it again, or use `screenshots.ps1` natively on Windows.
 
 ## License
 
