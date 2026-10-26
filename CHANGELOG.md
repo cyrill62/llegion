@@ -5,6 +5,10 @@ entries under **Unreleased** into the new version section when a version is bump
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-26
+
+Update screenshots.
+
 ## [0.3.0] - 2026-10-26
 
 Improve chats manager
