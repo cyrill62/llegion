@@ -1,5 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AnimatePresence, MotionConfig, motion } from 'motion/react'
+import { useTranslation } from 'react-i18next'
+import { LANGS, applyLang, initialLang, setLang } from './i18n'
 import logo from '../../../assets/logo.svg'
 import './style.css'
 
@@ -9,17 +11,6 @@ const shots = import.meta.glob('../../../docs/screenshots/*.png', { eager: true,
 const shot = (name) => shots[`../../../docs/screenshots/${name}.png`]
 const TABS = ['dashboard', 'models', 'chat', 'performance', 'gpu', 'logs', 'settings']
 
-const FEATURES = [
-  ['Dashboard', 'Server status and version, running models, GPU VRAM bars, CPU and RAM at a glance.'],
-  ['Models', 'Pull with progress, load with a chosen context, unload, inspect and delete models.'],
-  ['Chat', 'Streamed Markdown answers, tok/s and time to first token, side-by-side regenerations to compare models.'],
-  ['Performance', 'Live CPU, RAM, GPU and VRAM charts, plus a tokens/s benchmark using Ollama’s own counters.'],
-  ['GPU', 'Detects NVIDIA, AMD, Intel and Apple GPUs. Auto, custom device subset or CPU only, Vulkan toggle.'],
-  ['Logs', 'Live stream from the managed server, server.log or journalctl, with filters, search and save.'],
-  ['HTTPS + tokens', 'A supervised Caddy proxy terminates TLS and rejects requests without a valid bearer token.'],
-  ['Managed server', 'Runs ollama serve with your settings, captures its logs and restarts it if it crashes.'],
-]
-
 const fadeUp = {
   initial: { opacity: 0, y: 24 },
   whileInView: { opacity: 1, y: 0 },
@@ -28,8 +19,12 @@ const fadeUp = {
 }
 
 export default function Page() {
+  const { t } = useTranslation()
+  // After hydration, so the pre-rendered English page matches the first render.
+  useEffect(() => applyLang(initialLang()), [])
   return (
     <MotionConfig reducedMotion="user">
+      <LangMenu />
       <Hero />
       <Screens />
       <Features />
@@ -38,12 +33,12 @@ export default function Page() {
       <Download />
       <footer className="footer footer-center border-t border-base-300 p-8 text-sm">
         <p>
-          MIT licensed ·{' '}
+          {t('license')} ·{' '}
           <a className="link link-primary" href={REPO}>
-            Source on GitHub
+            {t('source')}
           </a>
         </p>
-        <p className="opacity-60">Llegion is an independent community project, not affiliated with or endorsed by Ollama.</p>
+        <p className="opacity-60">{t('disclaimer')}</p>
       </footer>
     </MotionConfig>
   )
@@ -51,7 +46,26 @@ export default function Page() {
 
 const SECTION = 'mx-auto max-w-5xl px-4 py-16'
 
+function LangMenu() {
+  const { t, i18n } = useTranslation()
+  return (
+    <select
+      aria-label={t('language')}
+      className="select select-sm fixed top-4 right-4 z-10 w-auto"
+      value={i18n.language}
+      onChange={(e) => setLang(e.target.value)}
+    >
+      {LANGS.map(([code, name]) => (
+        <option key={code} value={code}>
+          {name}
+        </option>
+      ))}
+    </select>
+  )
+}
+
 function Hero() {
+  const { t } = useTranslation()
   return (
     <header className="hero pt-24 pb-16">
       <div className="hero-content flex-col text-center">
@@ -77,12 +91,11 @@ function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3 }}
         >
-          A fast, native control panel for{' '}
+          {t('heroBefore')}
           <a className="link link-primary" href="https://ollama.com">
             Ollama
           </a>
-          . Run, monitor, benchmark and secure your local models from a desktop app or a terminal UI, on Linux, Windows
-          and macOS.
+          {t('heroAfter')}
         </motion.p>
         <motion.div
           className="mt-4 flex flex-wrap justify-center gap-3"
@@ -91,10 +104,10 @@ function Hero() {
           transition={{ delay: 0.45 }}
         >
           <a className="btn btn-primary btn-lg" href={`${REPO}/releases/latest`}>
-            Download
+            {t('download')}
           </a>
           <a className="btn btn-outline btn-lg" href={REPO}>
-            View on GitHub
+            {t('github')}
           </a>
         </motion.div>
       </div>
@@ -103,20 +116,21 @@ function Hero() {
 }
 
 function Screens() {
+  const { t } = useTranslation()
   const [tab, setTab] = useState('dashboard')
   return (
     <motion.section {...fadeUp} className="mx-auto max-w-5xl px-4">
-      <div role="tablist" aria-label="Screenshots" className="tabs tabs-box mx-auto mb-5 w-fit flex-wrap justify-center">
-        {TABS.map((t) => (
+      <div role="tablist" aria-label={t('screenshots')} className="tabs tabs-box mx-auto mb-5 w-fit flex-wrap justify-center">
+        {TABS.map((name) => (
           <button
-            key={t}
+            key={name}
             role="tab"
-            aria-selected={t === tab}
-            className={`tab relative capitalize ${t === tab ? 'text-primary-content' : ''}`}
-            onClick={() => setTab(t)}
+            aria-selected={name === tab}
+            className={`tab relative ${name === tab ? 'text-primary-content' : ''}`}
+            onClick={() => setTab(name)}
           >
-            {t === tab && <motion.span layoutId="pill" className="absolute inset-0 rounded-field bg-primary" />}
-            <span className="relative">{t}</span>
+            {name === tab && <motion.span layoutId="pill" className="absolute inset-0 rounded-field bg-primary" />}
+            <span className="relative">{t(`tabs.${name}`)}</span>
           </button>
         ))}
       </div>
@@ -126,7 +140,7 @@ function Screens() {
             <motion.img
               key={tab}
               src={shot(tab)}
-              alt={`Llegion ${tab} tab`}
+              alt={t('shotAlt', { tab: t(`tabs.${tab}`) })}
               width="1440"
               height="1080"
               className="block w-full"
@@ -143,15 +157,16 @@ function Screens() {
 }
 
 function Features() {
+  const { t } = useTranslation()
   return (
     <section className={SECTION}>
       <motion.h2 {...fadeUp} className="mb-8 text-3xl font-bold">
-        Everything Ollama, in one place
+        {t('featuresTitle')}
       </motion.h2>
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        {FEATURES.map(([title, text], i) => (
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        {t('features', { returnObjects: true }).map(([title, text], i) => (
           <motion.article
-            key={title}
+            key={i}
             className="card border border-base-300 bg-base-200"
             {...fadeUp}
             transition={{ ...fadeUp.transition, delay: (i % 4) * 0.08 }}
@@ -169,14 +184,15 @@ function Features() {
 }
 
 function Terminal() {
+  const { t } = useTranslation()
+  const keys = t('terminalKeys', { returnObjects: true })
   return (
     <motion.section {...fadeUp} className={`${SECTION} grid items-center gap-10 md:grid-cols-2`}>
       <div>
-        <h2 className="mb-4 text-3xl font-bold">Works over SSH too</h2>
+        <h2 className="mb-4 text-3xl font-bold">{t('terminalTitle')}</h2>
         <p className="opacity-80">
-          <code className="text-primary">llegion-tui</code> brings the same seven tabs to the terminal, on top of the same
-          core: settings, managed server, HTTPS proxy, logs and benchmarks. Keyboard first, mouse friendly, no GUI
-          libraries required.
+          <code className="text-primary">llegion-tui</code>
+          {t('terminalText')}
         </p>
       </div>
       <div className="mockup-code bg-black/60">
@@ -184,16 +200,16 @@ function Terminal() {
           <code>llegion-tui</code>
         </pre>
         <pre data-prefix="#" className="opacity-60">
-          <code>Tab / 1-7  switch tabs</code>
+          <code>Tab / 1-7  {keys[0]}</code>
         </pre>
         <pre data-prefix="#" className="opacity-60">
-          <code>S / R      start-stop / restart server</code>
+          <code>S / R      {keys[1]}</code>
         </pre>
         <pre data-prefix="#" className="opacity-60">
-          <code>P          toggle the HTTPS proxy</code>
+          <code>P          {keys[2]}</code>
         </pre>
         <pre data-prefix="#" className="opacity-60">
-          <code>?          all keys</code>
+          <code>?          {keys[3]}</code>
         </pre>
       </div>
     </motion.section>
@@ -201,15 +217,13 @@ function Terminal() {
 }
 
 function Proxy() {
+  const { t } = useTranslation()
   return (
     <motion.section {...fadeUp} className={`${SECTION} grid items-center gap-10 md:grid-cols-2`}>
       <div>
-        <h2 className="mb-4 text-3xl font-bold">Expose Ollama safely</h2>
-        <p className="opacity-80">
-          Ollama has no authentication. Turn on the proxy and Llegion binds Ollama to loopback, generates a Caddyfile and
-          supervises Caddy: TLS (self-signed, Let’s Encrypt or your own cert), bearer tokens you can label, copy and
-          revoke, optional CORS, and streamed tokens that arrive immediately.
-        </p>
+        <h2 className="mb-4 text-3xl font-bold">{t('proxyTitle')}</h2>
+        <p className="opacity-80">{t('proxyText')}</p>
+        <p className="mt-4 opacity-80">{t('balancingText')}</p>
       </div>
       <div className="mockup-code bg-black/60">
         <pre data-prefix="$">
@@ -233,16 +247,15 @@ function Proxy() {
 }
 
 function Download() {
+  const { t } = useTranslation()
   return (
     <motion.section {...fadeUp} className={`${SECTION} flex flex-col items-center gap-4 text-center`}>
-      <h2 className="text-3xl font-bold">Get Llegion</h2>
-      <p className="opacity-80">
-        Prebuilt archives for Linux (x64, arm64, glibc and musl), macOS (universal .app) and Windows (x64, arm64).
-      </p>
+      <h2 className="text-3xl font-bold">{t('getTitle')}</h2>
+      <p className="opacity-80">{t('getText')}</p>
       <a className="btn btn-primary btn-lg" href={`${REPO}/releases/latest`}>
-        Latest release
+        {t('latest')}
       </a>
-      <p className="opacity-60">Or build from source:</p>
+      <p className="opacity-60">{t('fromSource')}</p>
       <div className="mockup-code bg-black/60 text-left">
         <pre data-prefix="$">
           <code>cargo build --release</code>

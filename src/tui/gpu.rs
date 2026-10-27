@@ -11,6 +11,7 @@ use super::Tui;
 use super::kit::{self, AMBER, GREEN, RED};
 use crate::config::GpuMode;
 use crate::gpu::GpuKind;
+use crate::i18n::tr;
 use crate::util::format_bytes;
 
 impl Tui {
@@ -46,14 +47,14 @@ impl Tui {
     }
 
     pub(super) fn gpu_hints(&self) -> Vec<(&'static str, &'static str)> {
-        let mut hints = vec![("m", "mode")];
+        let mut hints = vec![("m", tr("mode"))];
         if self.draft.gpu.mode == GpuMode::Custom {
-            hints.push(("Space", "use device"));
+            hints.push(("Space", tr("use device")));
         }
         hints.extend([
-            ("i", "integrated GPUs"),
-            ("v", "Vulkan"),
-            ("d", "re-detect"),
+            ("i", tr("integrated GPUs")),
+            ("v", tr("Vulkan")),
+            ("d", tr("re-detect")),
         ]);
         hints.extend(self.save_hints());
         hints
@@ -74,21 +75,21 @@ impl Tui {
 
         if !detected || gpus.is_empty() {
             let text = if detected {
-                "No GPU detected: Ollama will run on the CPU."
+                tr("No GPU detected: Ollama will run on the CPU.")
             } else {
-                "Detecting GPUs…"
+                tr("Detecting GPUs…")
             };
             f.render_widget(
-                Paragraph::new(kit::weak(text)).block(kit::panel("Devices")),
+                Paragraph::new(kit::weak(text)).block(kit::panel(tr("Devices"))),
                 list_area,
             );
         } else {
             let rows = gpus.iter().enumerate().map(|(i, g)| {
                 let enabled = self.draft.is_gpu_enabled(g);
                 let use_cell = if enabled {
-                    Span::styled("yes", Style::new().fg(GREEN))
+                    Span::styled(tr("yes"), Style::new().fg(GREEN))
                 } else {
-                    Span::styled("no", Style::new().fg(RED))
+                    Span::styled(tr("no"), Style::new().fg(RED))
                 };
                 let vram = match g.vram_used {
                     Some(used) => {
@@ -109,7 +110,15 @@ impl Tui {
                 ])
             });
             let header = Row::new([
-                "", "Use", "Vendor", "Name", "Kind", "VRAM", "Util", "Temp", "Driver",
+                "",
+                tr("Use"),
+                tr("Vendor"),
+                tr("Name"),
+                tr("Kind"),
+                "VRAM",
+                tr("Util"),
+                tr("Temp"),
+                tr("Driver"),
             ])
             .style(Style::new().dark_gray());
             let widths = [
@@ -128,7 +137,7 @@ impl Tui {
                 Table::new(rows, widths)
                     .header(header)
                     .row_highlight_style(kit::selected())
-                    .block(kit::panel("Devices")),
+                    .block(kit::panel(tr("Devices"))),
                 list_area,
                 &mut state,
             );
@@ -136,33 +145,35 @@ impl Tui {
         }
 
         let g = &self.draft.gpu;
-        let on_off = |b: bool| if b { "on" } else { "off" };
+        let on_off = |b: bool| if b { tr("on") } else { tr("off") };
         let mode = match g.mode {
-            GpuMode::Auto => "Auto",
-            GpuMode::Custom => "Custom (Space toggles the selected device)",
-            GpuMode::CpuOnly => "CPU only",
+            GpuMode::Auto => tr("Auto"),
+            GpuMode::Custom => tr("Custom (Space toggles the selected device)"),
+            GpuMode::CpuOnly => tr("CPU only"),
         };
         let config = vec![
-            kit::kv("Mode", Span::raw(mode)),
+            kit::kv(tr("Mode"), Span::raw(mode)),
             kit::kv(
-                "Disable iGPUs",
+                tr("Disable iGPUs"),
                 Span::raw(format!(
-                    "{}  (integrated GPUs share system RAM and are often slower than the CPU)",
-                    on_off(g.disable_igpu)
+                    "{}  {}",
+                    on_off(g.disable_igpu),
+                    tr("(integrated GPUs share system RAM and are often slower than the CPU)")
                 )),
             ),
             kit::kv(
                 "Vulkan",
                 Span::raw(format!(
-                    "{}  (OLLAMA_VULKAN=1, for Intel and some AMD)",
-                    on_off(g.enable_vulkan)
+                    "{}  {}",
+                    on_off(g.enable_vulkan),
+                    tr("(OLLAMA_VULKAN=1, for Intel and some AMD)")
                 )),
             ),
         ];
         f.render_widget(
-            Paragraph::new(config).block(kit::panel(
+            Paragraph::new(config).block(kit::panel(tr(
                 "Configuration · applies when the server restarts",
-            )),
+            ))),
             config_area,
         );
 
@@ -172,19 +183,19 @@ impl Tui {
             .map(|(k, v)| Line::raw(format!("{k}={v}")))
             .collect();
         if lines.is_empty() {
-            lines.push(Line::from(kit::weak("None — Ollama defaults.")));
+            lines.push(Line::from(kit::weak(tr("None — Ollama defaults."))));
         }
         if g.mode == GpuMode::CpuOnly {
             lines.push(Line::from(Span::styled(
-                "All GPUs are hidden from Ollama.",
+                tr("All GPUs are hidden from Ollama."),
                 Style::new().fg(AMBER),
             )));
         }
         if gpus.iter().any(|g| g.kind == GpuKind::Integrated) && self.draft.gpu.disable_igpu {
-            lines.push(Line::from(kit::weak("Integrated GPUs are disabled.")));
+            lines.push(Line::from(kit::weak(tr("Integrated GPUs are disabled."))));
         }
         f.render_widget(
-            Paragraph::new(lines).block(kit::panel("Resulting environment")),
+            Paragraph::new(lines).block(kit::panel(tr("Resulting environment"))),
             env_area,
         );
     }

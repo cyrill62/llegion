@@ -1,6 +1,6 @@
 [package]
 name = "llegion"
-version = "0.3.1"
+version = "0.4.0"
 edition = "2024"
 license = "MIT"
 description = "Cross-platform control panel for Ollama, as a desktop app and a terminal UI"
@@ -43,11 +43,14 @@ rocksdb = { version = "0.24.0", default-features = false, optional = true }
 rusqlite = { version = "0.32.1", features = ["bundled"], optional = true }
 sysinfo = "0.39.6"
 toml = "1.1.8"
+# Interface language from the OS (already in the tree through eframe).
+sys-locale = "0.3.2"
 ureq = { version = "3.5.0", default-features = false, features = ["json", "gzip"] }
 
 [target.'cfg(windows)'.dependencies]
-# GPU usage and VRAM from the system's performance counters (already in the tree through sysinfo).
-windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi", "Win32_System_Performance"] }
+# GPU usage and VRAM from the system's performance counters (already in the tree through sysinfo),
+# and the current PATH from the registry to find the agents installed after startup.
+windows = { version = "0.62.2", features = ["Win32_Foundation", "Win32_Graphics_Dxgi", "Win32_System_Performance", "Win32_System_Registry"] }
 
 [profile.release]
 strip = true

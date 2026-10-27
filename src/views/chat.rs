@@ -6,6 +6,7 @@ use egui_commonmark::{CommonMarkCache, CommonMarkViewer};
 use crate::app::{AMBER, App, GREEN, RED};
 use crate::backend::{ChatEntry, ChatOptions, Reply, preferred_model};
 use crate::chat_store::{ChatConfig, ChatSummary};
+use crate::i18n::tr;
 use crate::ollama::LocalModel;
 use crate::views::kit;
 
@@ -86,9 +87,9 @@ impl App {
     pub fn chat_tab(&mut self, ui: &mut egui::Ui) {
         if !self.ctl.settings.ui.chat_warning_acknowledged {
             kit::panel(ui, ic!(WARNING, "Chat storage warning"), None, |ui| {
-                ui.label("Chat history is saved locally without encryption. Anyone with access to this account can read it.");
+                ui.label(tr("Chat history is saved locally without encryption. Anyone with access to this account can read it."));
                 ui.label(crate::config::chat_store_path().display().to_string());
-                if ui.button("I understand").clicked() {
+                if ui.button(tr("I understand")).clicked() {
                     self.ctl.settings.ui.chat_warning_acknowledged = true;
                     self.draft.ui.chat_warning_acknowledged = true;
                     if let Err(e) = self.ctl.settings.save() {
@@ -166,11 +167,11 @@ impl App {
         let mut moved: Option<(String, String)> = None;
         let mut removed_subject = None;
         ui.horizontal(|ui| {
-            ui.heading("Subjects");
+            ui.heading(tr("Subjects"));
             ui.menu_button(icon!(ADD), |ui| {
                 let response = ui.add(
                     egui::TextEdit::singleline(&mut self.chat_subject_name)
-                        .hint_text("Subject name"),
+                        .hint_text(tr("Subject name")),
                 );
                 response.request_focus();
                 let enter = response.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -186,7 +187,7 @@ impl App {
                 }
             })
             .response
-            .on_hover_text("New subject");
+            .on_hover_text(tr("New subject"));
         });
         ui.add_space(6.0);
 
@@ -208,7 +209,7 @@ impl App {
                             !subject.is_empty() && self.collapsed_chat_subjects.contains(subject);
                         ui.horizontal(|ui| {
                             let title = if subject.is_empty() {
-                                "No subject".to_owned()
+                                tr("No subject").to_owned()
                             } else {
                                 format!("{} {subject}", if collapsed { "▸" } else { "▾" })
                             };
@@ -230,7 +231,7 @@ impl App {
                                     |ui| {
                                         if ui
                                             .small_button("×")
-                                            .on_hover_text("Remove this empty subject")
+                                            .on_hover_text(tr("Remove this empty subject"))
                                             .clicked()
                                         {
                                             removed_subject = Some(subject.to_owned());
@@ -256,14 +257,14 @@ impl App {
                             self.chat_row(
                                 ui,
                                 active_id,
-                                "New chat",
+                                tr("New chat"),
                                 true,
                                 &mut switched,
                                 &mut delete_chat,
                             );
                         }
                         if chats.is_empty() && !new_chat_here {
-                            ui.label(RichText::new("Drop chats here").weak().small());
+                            ui.label(RichText::new(tr("Drop chats here")).weak().small());
                         }
                     });
                     if let Some(id) = dropped {
@@ -314,7 +315,7 @@ impl App {
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .small_button("×")
-                    .on_hover_text("Close and delete chat")
+                    .on_hover_text(tr("Close and delete chat"))
                     .clicked()
                 {
                     *delete_chat = Some(id.to_owned());
@@ -403,38 +404,37 @@ impl App {
     ) {
         ui.horizontal(|ui| {
             let (toggle, tip) = if self.chat_subjects_open {
-                (icon!(PANEL_CLOSE), "Hide subjects")
+                (icon!(PANEL_CLOSE), tr("Hide subjects"))
             } else {
-                (icon!(PANEL_OPEN), "Show subjects")
+                (icon!(PANEL_OPEN), tr("Show subjects"))
             };
             if ui.button(toggle).on_hover_text(tip).clicked() {
                 self.chat_subjects_open = !self.chat_subjects_open;
             }
-            ui.heading("Chat");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.button(ic!(NEW_CHAT, "New chat")).clicked() {
-                    self.ctl.backend.new_chat();
-                    switched_chat = true;
-                }
-                if ui
-                    .add_enabled(
-                        !entries.is_empty(),
-                        egui::Button::new(ic!(COPY, "Copy chat")),
-                    )
-                    .clicked()
-                {
-                    ui.ctx().copy_text(transcript(entries));
-                }
-            });
+            ui.heading(tr("Chat"));
+            ui.add_space(12.0);
+            if ui.button(ic!(NEW_CHAT, "New chat")).clicked() {
+                self.ctl.backend.new_chat();
+                switched_chat = true;
+            }
+            if ui
+                .add_enabled(
+                    !entries.is_empty(),
+                    egui::Button::new(ic!(COPY, "Copy chat")),
+                )
+                .clicked()
+            {
+                ui.ctx().copy_text(transcript(entries));
+            }
         });
         ui.add_space(8.0);
 
         kit::panel(ui, ic!(TUNE, "Model & options"), None, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Model");
+                ui.label(tr("Model"));
                 egui::ComboBox::from_id_salt("chat_model")
                     .selected_text(if self.chat_model.is_empty() {
-                        "No models"
+                        tr("No models")
                     } else {
                         &self.chat_model
                     })
@@ -445,21 +445,25 @@ impl App {
                         }
                     });
                 if let Some(r) = running.iter().find(|r| r.name == self.chat_model) {
-                    kit::badge(ui, format!("loaded · {}", r.processor()), GREEN);
+                    kit::badge(
+                        ui,
+                        trf!("loaded · {processor}", processor = r.processor()),
+                        GREEN,
+                    );
                 } else if !self.chat_model.is_empty() {
-                    kit::badge(ui, "not loaded", AMBER)
-                        .on_hover_text("The first answer includes the model load time.");
+                    kit::badge(ui, tr("not loaded"), AMBER)
+                        .on_hover_text(tr("The first answer includes the model load time."));
                 }
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label("Context");
+                ui.label(tr("Context"));
                 crate::views::models::context_picker(ui, "chat_ctx", &mut self.chat_ctx);
                 ui.add_space(16.0);
-                ui.checkbox(&mut self.chat_markdown, "Render Markdown")
-                    .on_hover_text("Off shows the raw text the model sent");
+                ui.checkbox(&mut self.chat_markdown, tr("Render Markdown"))
+                    .on_hover_text(tr("Off shows the raw text the model sent"));
                 ui.add_space(16.0);
                 let mut custom = self.chat_temperature.is_some();
-                if ui.checkbox(&mut custom, "Temperature").changed() {
+                if ui.checkbox(&mut custom, tr("Temperature")).changed() {
                     self.chat_temperature = custom.then_some(0.7);
                 }
                 match &mut self.chat_temperature {
@@ -467,18 +471,18 @@ impl App {
                         ui.add(egui::Slider::new(t, 0.0..=2.0).step_by(0.05));
                     }
                     None => {
-                        ui.label(RichText::new("model default").weak());
+                        ui.label(RichText::new(tr("model default")).weak());
                     }
                 }
             });
-            egui::CollapsingHeader::new("System prompt")
+            egui::CollapsingHeader::new(tr("System prompt"))
                 .id_salt("chat_system")
                 .show(ui, |ui| {
                     ui.add(
                         egui::TextEdit::multiline(&mut self.chat_system)
                             .desired_rows(3)
                             .desired_width(f32::INFINITY)
-                            .hint_text("Optional instructions sent before the conversation"),
+                            .hint_text(tr("Optional instructions sent before the conversation")),
                     );
                 });
         });
@@ -508,7 +512,7 @@ impl App {
                     ui.add_space(24.0);
                     ui.vertical_centered(|ui| {
                         let hint = if models.is_empty() {
-                            "No models downloaded yet. Pull one in the Models tab."
+                            tr("No models downloaded yet. Pull one in the Models tab.")
                         } else {
                             "Send a message to start. Under each message you can copy it, edit it, \
                              or regenerate the answer with another model to compare speed and quality."
@@ -586,7 +590,7 @@ impl App {
                     .id(id)
                     .desired_rows(3)
                     .desired_width(ui.available_width() - 130.0)
-                    .hint_text("Message… (Enter to send, Shift+Enter for a new line)"),
+                    .hint_text(tr("Message… (Enter to send, Shift+Enter for a new line)")),
             );
             if streaming {
                 if ui.button(ic!(STOP, "Stop")).clicked() {
@@ -639,9 +643,9 @@ fn user_message(
             ui.add_enabled_ui(!streaming, |ui| {
                 if ui
                     .small_button(ic!(EDIT, "Edit"))
-                    .on_hover_text(
+                    .on_hover_text(tr(
                         "Put this message back in the input and remove it and what follows",
-                    )
+                    ))
                     .clicked()
                 {
                     action = Some(Action::Edit(at));
@@ -722,9 +726,9 @@ fn assistant_message(
             ui.horizontal(|ui| {
                 ui.spinner();
                 let what = if r.thinking.is_empty() {
-                    "Waiting for the first token"
+                    tr("Waiting for the first token")
                 } else {
-                    "Thinking"
+                    tr("Thinking")
                 };
                 ui.label(
                     RichText::new(format!("{what}… {:.1}s", r.started.elapsed().as_secs_f64()))
@@ -736,7 +740,7 @@ fn assistant_message(
             ui.label(RichText::new(format!("{} {err}", icon!(WARNING))).color(RED));
         }
         if r.stopped {
-            ui.label(RichText::new("Stopped").color(AMBER));
+            ui.label(RichText::new(tr("Stopped")).color(AMBER));
         }
         if let Some(line) = r.stats_line() {
             ui.label(
@@ -763,9 +767,9 @@ fn assistant_message(
                 }
             })
             .response
-            .on_hover_text(
+            .on_hover_text(tr(
                 "Adds another answer here (use ‹ › to compare); later messages are removed",
-            );
+            ));
         });
     });
     action

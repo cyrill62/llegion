@@ -2,6 +2,7 @@ use eframe::egui::{self, Color32, RichText};
 
 use crate::app::{AMBER, App, RED};
 use crate::config::LogSource;
+use crate::i18n::tr;
 use crate::logs::{Level, LogLine, line_filter};
 use crate::views::kit;
 
@@ -34,33 +35,33 @@ impl App {
     }
 
     pub fn logs_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Logs");
+        ui.heading(tr("Logs"));
         ui.add_space(8.0);
         kit::panel(ui, ic!(SEARCH, "Source & filters"), None, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.label("Source");
+                ui.label(tr("Source"));
                 let before = self.draft.logs.source;
                 egui::ComboBox::from_id_salt("log_source")
                     .selected_text(match self.draft.logs.source {
-                        LogSource::Managed => "Managed server only",
-                        LogSource::File => "Log file",
-                        LogSource::Journal => "systemd journal",
+                        LogSource::Managed => tr("Managed server only"),
+                        LogSource::File => tr("Log file"),
+                        LogSource::Journal => tr("systemd journal"),
                     })
                     .show_ui(ui, |ui| {
                         ui.selectable_value(
                             &mut self.draft.logs.source,
                             LogSource::Managed,
-                            "Managed server only",
+                            tr("Managed server only"),
                         );
                         ui.selectable_value(
                             &mut self.draft.logs.source,
                             LogSource::File,
-                            "Log file",
+                            tr("Log file"),
                         );
                         ui.selectable_value(
                             &mut self.draft.logs.source,
                             LogSource::Journal,
-                            "systemd journal",
+                            tr("systemd journal"),
                         );
                     });
                 if self.draft.logs.source != before {
@@ -70,7 +71,7 @@ impl App {
                     self.ctl.sync_log_follower();
                 }
                 ui.separator();
-                ui.label("Minimum level");
+                ui.label(tr("Minimum level"));
                 egui::ComboBox::from_id_salt("log_level")
                     .selected_text(self.log_view.min_level.label())
                     .show_ui(ui, |ui| {
@@ -89,8 +90,8 @@ impl App {
                 );
             });
             ui.horizontal(|ui| {
-                kit::switch(ui, &mut self.log_view.autoscroll, "Auto-scroll");
-                kit::switch(ui, &mut self.log_view.wrap, "Wrap");
+                kit::switch(ui, &mut self.log_view.autoscroll, tr("Auto-scroll"));
+                kit::switch(ui, &mut self.log_view.wrap, tr("Wrap"));
                 let pause_label = if self.log_view.paused {
                     ic!(PLAY, "Resume")
                 } else {
@@ -120,30 +121,35 @@ impl App {
                         Err(e) => self.ctl.logs.app_error(format!("Failed to save logs: {e}")),
                     }
                 }
-                ui.label(RichText::new(format!("{} lines", self.log_view.cache.len())).weak());
+                ui.label(
+                    RichText::new(trf!("{count} lines", count = self.log_view.cache.len())).weak(),
+                );
                 if self.log_view.paused {
-                    ui.label(RichText::new("paused").color(AMBER));
+                    ui.label(RichText::new(tr("paused")).color(AMBER));
                 }
             });
             match self.ctl.settings.logs.source {
                 LogSource::File => {
                     ui.label(
-                        RichText::new(format!("Following {}", self.ctl.settings.logs.file_path))
-                            .weak(),
+                        RichText::new(trf!(
+                            "Following {source}",
+                            source = self.ctl.settings.logs.file_path
+                        ))
+                        .weak(),
                     );
                 }
                 LogSource::Journal => {
                     ui.label(
-                        RichText::new(format!(
-                            "Following journalctl -u {}",
-                            self.ctl.settings.logs.journal_unit
+                        RichText::new(trf!(
+                            "Following journalctl -u {unit}",
+                            unit = self.ctl.settings.logs.journal_unit
                         ))
                         .weak(),
                     );
                 }
                 LogSource::Managed if !self.ctl.settings.server.manage_server => {
                     ui.label(
-                    RichText::new("The server is not managed by this app; pick a log file or the journal to see its output.")
+                    RichText::new(tr("The server is not managed by this app; pick a log file or the journal to see its output."))
                         .color(AMBER),
                 );
                 }

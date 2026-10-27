@@ -153,7 +153,24 @@ pub fn generate(settings: &Settings) -> String {
     ));
     out.push_str("    proxy_request_header_remove \"Authorization\"\n");
 
-    let proxy = format!("proxy {}", quote(&format!("http://{upstream}")));
+    // shortcut: every backend gets the local Host header, so remotes behind a name-based vhost fail; send per-backend Host if needed.
+    let mut upstreams = vec![format!("http://{upstream}")];
+    upstreams.extend(
+        p.backends
+            .iter()
+            .filter(|b| p.load_balancing && b.enabled && b.is_valid())
+            .map(|b| b.url.trim().to_string()),
+    );
+    let proxy = |indent: &str| {
+        let mut s: String = upstreams
+            .iter()
+            .map(|u| format!("{indent}proxy {}\n", quote(u)))
+            .collect();
+        if upstreams.len() > 1 {
+            s.push_str(&format!("{indent}lb_algorithm \"round_robin\"\n"));
+        }
+        s
+    };
     let mut indent = "    ";
     if !cors.is_empty() {
         out.push_str("    if \"PREFLIGHT\" {\n        status 204 body=\"\"\n    }\n");
@@ -162,10 +179,11 @@ pub fn generate(settings: &Settings) -> String {
     }
     if p.require_token {
         out.push_str(&format!(
-            "{indent}if \"AUTHORIZED\" {{\n{indent}    {proxy}\n{indent}}}\n{indent}if_not \"AUTHORIZED\" {{\n{indent}    status 401 body=\"Unauthorized\"\n{indent}}}\n"
+            "{indent}if \"AUTHORIZED\" {{\n{}{indent}}}\n{indent}if_not \"AUTHORIZED\" {{\n{indent}    status 401 body=\"Unauthorized\"\n{indent}}}\n",
+            proxy(&format!("{indent}    "))
         ));
     } else {
-        out.push_str(&format!("{indent}{proxy}\n"));
+        out.push_str(&proxy(indent));
     }
     if !cors.is_empty() {
         out.push_str("    }\n");
@@ -297,5 +315,29 @@ mod tests {
         assert!(c.contains("tls \"/c.pem\" \"/k.pem\""));
         assert!(c.contains("\n    proxy \"http://127.0.0.1:11434\"\n}"));
         assert!(!c.contains("AUTHORIZED"));
+        assert!(!c.contains("lb_algorithm"));
+    }
+
+    #[test]
+    fn enabled_backends_are_round_robined() {
+        let mut s = settings(TlsMode::Internal);
+        let backend = |url: &str, enabled| crate::config::Backend {
+            url: url.into(),
+            enabled,
+        };
+        s.proxy.backends = vec![
+            backend(" http://gpu1.lan:11434 ", true),
+            backend("http://off.lan:11434", false),
+            backend("gpu2.lan:11434", true),
+        ];
+        let c = generate(&s);
+        assert!(c.contains(
+            "        proxy \"http://127.0.0.1:11434\"\n        proxy \"http://gpu1.lan:11434\"\n        lb_algorithm \"round_robin\"\n    }"
+        ));
+        assert!(!c.contains("off.lan") && !c.contains("gpu2.lan"));
+
+        s.proxy.load_balancing = false;
+        let c = generate(&s);
+        assert!(!c.contains("gpu1.lan") && !c.contains("lb_algorithm"));
     }
 }

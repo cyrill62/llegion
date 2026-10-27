@@ -31,6 +31,7 @@ use ratatui::{DefaultTerminal, Frame};
 use crate::config::Settings;
 use crate::control::Control;
 use crate::ferron;
+use crate::i18n::tr;
 use crate::util::Repaint;
 use input::LineEdit;
 use kit::{AMBER, GREEN, RED};
@@ -59,13 +60,13 @@ impl Tab {
 
     fn label(self) -> &'static str {
         match self {
-            Tab::Dashboard => "Dashboard",
-            Tab::Models => "Models",
-            Tab::Chat => "Chat",
-            Tab::Performance => "Performance",
+            Tab::Dashboard => tr("Dashboard"),
+            Tab::Models => tr("Models"),
+            Tab::Chat => tr("Chat"),
+            Tab::Performance => tr("Performance"),
             Tab::Gpu => "GPU",
-            Tab::Logs => "Logs",
-            Tab::Settings => "Settings",
+            Tab::Logs => tr("Logs"),
+            Tab::Settings => tr("Settings"),
         }
     }
 }
@@ -87,13 +88,13 @@ enum Field {
 impl Field {
     fn prompt(self) -> &'static str {
         match self {
-            Field::ModelFilter | Field::LogFilter => "Filter",
-            Field::PullName => "Pull model (e.g. qwen3:8b)",
-            Field::ChatInput => "Message",
-            Field::ChatSystem => "System prompt",
-            Field::BenchPrompt => "Benchmark prompt",
-            Field::Setting(_) => "Value",
-            Field::TokenLabel => "New token label",
+            Field::ModelFilter | Field::LogFilter => tr("Filter"),
+            Field::PullName => tr("Pull model (e.g. qwen3:8b)"),
+            Field::ChatInput => tr("Message"),
+            Field::ChatSystem => tr("System prompt"),
+            Field::BenchPrompt => tr("Benchmark prompt"),
+            Field::Setting(_) => tr("Value"),
+            Field::TokenLabel => tr("New token label"),
         }
     }
 }
@@ -568,11 +569,17 @@ impl Tui {
         )];
         spans.push(if connected {
             Span::styled(
-                format!("● Connected v{} ", version.unwrap_or_default()),
+                format!(
+                    "● {} ",
+                    trf!(
+                        "Connected v{version}",
+                        version = version.unwrap_or_default()
+                    )
+                ),
                 Style::new().fg(GREEN),
             )
         } else {
-            Span::styled("● Disconnected ", Style::new().fg(RED))
+            Span::styled(tr("● Disconnected "), Style::new().fg(RED))
         });
         spans.push(kit::weak(format!(
             "{}  ",
@@ -580,27 +587,39 @@ impl Tui {
         )));
         let p = &self.ctl.ollama_proc;
         spans.push(if !self.ctl.settings.server.manage_server {
-            kit::weak("external server  ")
+            kit::weak(tr("external server  "))
         } else if p.is_running() {
             Span::styled(
-                format!("server running · pid {}  ", p.pid().unwrap_or(0)),
+                format!(
+                    "{}  ",
+                    trf!("server running · pid {pid}", pid = p.pid().unwrap_or(0))
+                ),
                 Style::new().fg(GREEN),
             )
         } else {
-            Span::styled("server stopped  ", Style::new().fg(AMBER))
+            Span::styled(tr("server stopped  "), Style::new().fg(AMBER))
         });
         if self.ctl.settings.proxy.enabled {
             spans.push(if self.ctl.ferron_proc.is_running() {
                 Span::styled(
-                    format!("proxy on {}  ", ferron::public_url(&self.ctl.settings)),
+                    format!(
+                        "{}  ",
+                        trf!(
+                            "proxy on {url}",
+                            url = ferron::public_url(&self.ctl.settings)
+                        )
+                    ),
                     Style::new().fg(GREEN),
                 )
             } else {
-                Span::styled("proxy off  ", Style::new().fg(AMBER))
+                Span::styled(tr("proxy off  "), Style::new().fg(AMBER))
             });
         }
         if self.draft_dirty() {
-            spans.push(Span::styled("● unsaved settings", Style::new().fg(AMBER)));
+            spans.push(Span::styled(
+                tr("● unsaved settings"),
+                Style::new().fg(AMBER),
+            ));
         }
         f.render_widget(Line::from(spans), area);
     }
@@ -625,20 +644,22 @@ impl Tui {
         let mut spans = Vec::new();
         let hints = if let Some(c) = &self.confirm {
             let question = match c {
-                Confirm::DeleteModel(name) => format!("Delete {name} from disk?"),
-                Confirm::DeleteToken(i) => format!(
-                    "Delete token \"{}\"?",
-                    self.draft.proxy.tokens.get(*i).map_or("", |t| &t.label)
+                Confirm::DeleteModel(name) => trf!("Delete {name} from disk?", name = name),
+                Confirm::DeleteToken(i) => trf!(
+                    "Delete token \"{label}\"?",
+                    label = self.draft.proxy.tokens.get(*i).map_or("", |t| &t.label)
                 ),
-                Confirm::ResetSettings => "Reset all settings to defaults (not saved yet)?".into(),
+                Confirm::ResetSettings => {
+                    tr("Reset all settings to defaults (not saved yet)?").into()
+                }
             };
             spans.push(Span::styled(
                 format!(" {question}  "),
                 Style::new().fg(AMBER).bold(),
             ));
-            vec![("y", "yes"), ("n", "no")]
+            vec![("y", tr("yes")), ("n", tr("no"))]
         } else if self.editing.is_some() {
-            vec![("Enter", "send"), ("Esc", "stop typing")]
+            vec![("Enter", tr("send")), ("Esc", tr("stop typing"))]
         } else {
             let mut hints = match self.tab {
                 Tab::Dashboard => self.dashboard_hints(),
@@ -649,7 +670,7 @@ impl Tui {
                 Tab::Logs => self.logs_hints(),
                 Tab::Settings => self.settings_hints(),
             };
-            hints.extend([("?", "help"), ("q", "quit")]);
+            hints.extend([("?", tr("help")), ("q", tr("quit"))]);
             hints
         };
         let mut x = area.x + spans.iter().map(|s| s.width() as u16).sum::<u16>();
@@ -687,7 +708,10 @@ impl Tui {
                 Paragraph::new(n.text.as_str())
                     .wrap(Wrap { trim: true })
                     .style(Style::new().fg(color))
-                    .block(kit::panel(if n.error { "Error" } else { "Info" }).border_style(color)),
+                    .block(
+                        kit::panel(if n.error { tr("Error") } else { tr("Info") })
+                            .border_style(color),
+                    ),
                 area,
             );
         }
@@ -695,17 +719,20 @@ impl Tui {
 
     fn draw_help(&self, f: &mut Frame) {
         let keys: &[(&str, &str)] = &[
-            ("Tab / Shift+Tab, 1-7", "switch tab"),
-            ("↑ ↓ / j k, PgUp PgDn", "move / scroll"),
-            ("S", "start / stop the managed server"),
-            ("R", "restart the managed server"),
-            ("P", "start / stop the HTTPS proxy"),
-            ("F5", "refresh now"),
-            ("Enter / Esc", "confirm / cancel when typing"),
-            ("Ctrl+U, Ctrl+W", "clear line / delete word when typing"),
-            ("q, Ctrl+C", "quit"),
-            ("Mouse", "click tabs, rows and key hints; wheel scrolls"),
-            ("Shift+drag", "select text (most terminals)"),
+            ("Tab / Shift+Tab, 1-7", tr("switch tab")),
+            ("↑ ↓ / j k, PgUp PgDn", tr("move / scroll")),
+            ("S", tr("start / stop the managed server")),
+            ("R", tr("restart the managed server")),
+            ("P", tr("start / stop the HTTPS proxy")),
+            ("F5", tr("refresh now")),
+            ("Enter / Esc", tr("confirm / cancel when typing")),
+            ("Ctrl+U, Ctrl+W", tr("clear line / delete word when typing")),
+            ("q, Ctrl+C", tr("quit")),
+            (
+                tr("Mouse"),
+                tr("click tabs, rows and key hints; wheel scrolls"),
+            ),
+            ("Shift+drag", tr("select text (most terminals)")),
         ];
         let mut lines: Vec<Line> = keys
             .iter()
@@ -717,11 +744,11 @@ impl Tui {
             })
             .collect();
         lines.push(Line::raw(""));
-        lines.push(Line::from(kit::weak(
+        lines.push(Line::from(kit::weak(tr(
             "Tab-specific keys are listed at the bottom of the screen.",
-        )));
+        ))));
         let area = kit::popup(f, 76, lines.len() as u16 + 2);
         self.hit(area, Hit::Block);
-        f.render_widget(Paragraph::new(lines).block(kit::panel("Keys")), area);
+        f.render_widget(Paragraph::new(lines).block(kit::panel(tr("Keys"))), area);
     }
 }

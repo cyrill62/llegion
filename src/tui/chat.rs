@@ -11,6 +11,7 @@ use super::kit::{self, AMBER, RED};
 use super::{Field, Hit, Tui};
 use crate::backend::{ChatEntry, ChatOptions, preferred_model};
 use crate::chat_store::ChatConfig;
+use crate::i18n::tr;
 use crate::util::{CONTEXT_PRESETS, ctx_label};
 
 const TEMPERATURES: [Option<f32>; 7] = [
@@ -169,20 +170,20 @@ impl Tui {
 
     pub(super) fn chat_hints(&self) -> Vec<(&'static str, &'static str)> {
         if !self.ctl.settings.ui.chat_warning_acknowledged {
-            return vec![("Enter", "acknowledge chat storage warning")];
+            return vec![("Enter", tr("acknowledge chat storage warning"))];
         }
         vec![
-            ("Enter", "type"),
-            ("Esc", "stop"),
-            ("m", "model"),
-            ("g", "regenerate"),
-            ("[ ]", "variant"),
-            ("s", "system"),
-            ("c", "context"),
-            ("t", "temperature"),
-            ("n", "new chat"),
-            ("o/O", "older/newer chat"),
-            ("↑↓", "scroll"),
+            ("Enter", tr("type")),
+            ("Esc", tr("stop")),
+            ("m", tr("model")),
+            ("g", tr("regenerate")),
+            ("[ ]", tr("variant")),
+            ("s", tr("system")),
+            ("c", tr("context")),
+            ("t", tr("temperature")),
+            ("n", tr("new chat")),
+            ("o/O", tr("older/newer chat")),
+            ("↑↓", tr("scroll")),
         ]
     }
 
@@ -225,12 +226,12 @@ impl Tui {
             .chat
             .temperature
             .map(|t| format!("{t:.1}"))
-            .unwrap_or_else(|| "model default".into());
+            .unwrap_or_else(|| tr("model default").into());
         let mut opts = vec![
             kit::weak(" model "),
             Span::styled(
                 if self.chat.model.is_empty() {
-                    "none downloaded".to_string()
+                    tr("none downloaded").to_string()
                 } else {
                     self.chat.model.clone()
                 },
@@ -250,20 +251,22 @@ impl Tui {
         let mut lines: Vec<Line> = Vec::new();
         if !self.ctl.settings.ui.chat_warning_acknowledged {
             lines.push(Line::from(Span::styled(
-                "Chat history is stored without encryption.",
+                tr("Chat history is stored without encryption."),
                 Style::new().fg(AMBER).bold(),
             )));
-            lines.push(Line::raw("Anyone with access to this account can read it."));
+            lines.push(Line::raw(tr(
+                "Anyone with access to this account can read it.",
+            )));
             lines.push(Line::raw(
                 crate::config::chat_store_path().display().to_string(),
             ));
-            lines.push(Line::from(kit::weak("Press Enter to continue.")));
+            lines.push(Line::from(kit::weak(tr("Press Enter to continue."))));
         }
         for e in &entries {
             match e {
                 ChatEntry::User(text) => {
                     lines.push(Line::from(Span::styled(
-                        "You",
+                        tr("You"),
                         Style::new().fg(kit::ACCENT).bold(),
                     )));
                     lines.extend(text.lines().map(|l| Line::raw(l.to_string())));
@@ -293,7 +296,10 @@ impl Tui {
                     if let Some(err) = &r.error {
                         lines.push(Line::from(Span::styled(err.clone(), Style::new().fg(RED))));
                     } else if r.stopped {
-                        lines.push(Line::from(Span::styled("stopped", Style::new().fg(AMBER))));
+                        lines.push(Line::from(Span::styled(
+                            tr("stopped"),
+                            Style::new().fg(AMBER),
+                        )));
                     }
                     if let Some(stats) = r.stats_line() {
                         lines.push(Line::from(kit::weak(stats)));
@@ -303,14 +309,14 @@ impl Tui {
             lines.push(Line::raw(""));
         }
         if entries.is_empty() && self.ctl.settings.ui.chat_warning_acknowledged {
-            lines.push(Line::from(kit::weak(
+            lines.push(Line::from(kit::weak(tr(
                 "Press Enter to type a message. Answers stream here.",
-            )));
+            ))));
         }
         let block = kit::panel(if streaming {
-            "Conversation · streaming"
+            tr("Conversation · streaming")
         } else {
-            "Conversation"
+            tr("Conversation")
         });
         let inner = block.inner(msgs_area);
         let para = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -324,7 +330,7 @@ impl Tui {
             .editing
             .as_ref()
             .filter(|e| e.field == Field::ChatInput);
-        let input_block = kit::panel("Message").border_style(if editing.is_some() {
+        let input_block = kit::panel(tr("Message")).border_style(if editing.is_some() {
             Style::new().fg(kit::ACCENT)
         } else {
             Style::new().dark_gray()
@@ -343,7 +349,7 @@ impl Tui {
                 f.render_widget(Span::raw(text), inner);
                 f.set_cursor_position((inner.x + col, inner.y));
             }
-            None => f.render_widget(kit::weak("Enter to type"), inner),
+            None => f.render_widget(kit::weak(tr("Enter to type")), inner),
         }
     }
 }

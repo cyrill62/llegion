@@ -3,6 +3,8 @@ use egui_plot::{Legend, Line, Plot, PlotPoints};
 
 use crate::app::App;
 use crate::backend::{BenchRecord, Sample};
+use crate::i18n::tr;
+use crate::ollama::{LocalModel, RunningModel};
 use crate::util::{ctx_short, format_bytes};
 use crate::views::kit;
 
@@ -30,7 +32,7 @@ fn chart(
         .allow_drag(false)
         .allow_scroll(false)
         .include_y(0.0)
-        .x_axis_label("seconds")
+        .x_axis_label(tr("seconds"))
         .y_axis_formatter(move |mark, _| format!("{:.0}{unit}", mark.value));
     if let Some(max) = y_max {
         plot = plot.include_y(max);
@@ -57,19 +59,19 @@ impl App {
         };
         let now = history.last().map(|s| s.t).unwrap_or(0.0);
 
-        ui.heading("Performance");
+        ui.heading(tr("Performance"));
         ui.add_space(8.0);
         if let Some(last) = history.last() {
             ui.columns(4, |cols| {
                 kit::tile(
                     &mut cols[0],
-                    "System CPU",
+                    tr("System CPU"),
                     RichText::new(format!("{:.0}%", last.cpu)),
                     None,
                 );
                 kit::tile(
                     &mut cols[1],
-                    "System RAM",
+                    tr("System RAM"),
                     RichText::new(format_bytes(last.ram_used)),
                     Some(format!("of {}", format_bytes(last.ram_total))),
                 );
@@ -81,7 +83,7 @@ impl App {
                 );
                 kit::tile(
                     &mut cols[3],
-                    "Models in VRAM",
+                    tr("Models in VRAM"),
                     RichText::new(format_bytes(last.models_vram)),
                     None,
                 );
@@ -97,14 +99,14 @@ impl App {
             .any(|s| s.gpus.iter().any(|g| g.vram_used.is_some()));
 
         ui.columns(2, |cols| {
-            kit::panel(&mut cols[0], "CPU usage (%)", None, |ui| {
+            kit::panel(&mut cols[0], tr("CPU usage (%)"), None, |ui| {
                 chart(
                     ui,
                     "cpu",
                     Some(100.0),
                     "%",
                     vec![
-                        Line::new("System", series(&history, now, |s| Some(s.cpu as f64))),
+                        Line::new(tr("System"), series(&history, now, |s| Some(s.cpu as f64))),
                         Line::new(
                             "Ollama",
                             series(&history, now, |s| Some(s.ollama_cpu as f64)),
@@ -112,7 +114,7 @@ impl App {
                     ],
                 );
             });
-            kit::panel(&mut cols[1], "Memory (GiB)", None, |ui| {
+            kit::panel(&mut cols[1], tr("Memory (GiB)"), None, |ui| {
                 let ram_total = history.last().map(|s| s.ram_total as f64 / GIB);
                 chart(
                     ui,
@@ -121,11 +123,11 @@ impl App {
                     "",
                     vec![
                         Line::new(
-                            "System RAM",
+                            tr("System RAM"),
                             series(&history, now, |s| Some(s.ram_used as f64 / GIB)),
                         ),
                         Line::new(
-                            "Ollama RAM",
+                            tr("Ollama RAM"),
                             series(&history, now, |s| Some(s.ollama_mem as f64 / GIB)),
                         ),
                     ],
@@ -135,15 +137,15 @@ impl App {
 
         if gpus.is_empty() {
             kit::panel(ui, "GPU", None, |ui| {
-                ui.label(RichText::new("No GPU detected.").weak());
+                ui.label(RichText::new(tr("No GPU detected.")).weak());
             });
         } else if !has_util && !has_vram {
             kit::panel(ui, "GPU", None, |ui| {
-                ui.label(RichText::new("Live GPU metrics are not available for this GPU/OS (supported: NVIDIA via nvidia-smi, AMD on Linux, and any GPU on Windows).").weak());
+                ui.label(RichText::new(tr("Live GPU metrics are not available for this GPU/OS (supported: NVIDIA via nvidia-smi, AMD on Linux, and any GPU on Windows).")).weak());
             });
         } else {
             ui.columns(2, |cols| {
-                kit::panel(&mut cols[0], "GPU utilisation (%)", None, |ui| {
+                kit::panel(&mut cols[0], tr("GPU utilisation (%)"), None, |ui| {
                     let lines = gpus
                         .iter()
                         .enumerate()
@@ -158,7 +160,7 @@ impl App {
                         .collect();
                     chart(ui, "gpu_util", Some(100.0), "%", lines);
                 });
-                kit::panel(&mut cols[1], "VRAM used (GiB)", None, |ui| {
+                kit::panel(&mut cols[1], tr("VRAM used (GiB)"), None, |ui| {
                     let max = gpus.iter().map(|g| g.vram_total).max().unwrap_or(0) as f64 / GIB;
                     let lines = gpus
                         .iter()
@@ -180,37 +182,64 @@ impl App {
             });
         }
 
+        // Side by side when there is room, the results getting the larger share.
+        if benchmarks.is_empty() {
+            self.bench_form(ui, &models, &running, bench_running);
+        } else if ui.available_width() >= 1400.0 {
+            ui.horizontal_top(|ui| {
+                let left = (ui.available_width() - ui.spacing().item_spacing.x) * 0.38;
+                ui.vertical(|ui| {
+                    ui.set_width(left);
+                    self.bench_form(ui, &models, &running, bench_running);
+                });
+                ui.vertical(|ui| self.bench_results(ui, &benchmarks));
+            });
+        } else {
+            self.bench_form(ui, &models, &running, bench_running);
+            self.bench_results(ui, &benchmarks);
+        }
+    }
+
+    fn bench_form(
+        &mut self,
+        ui: &mut egui::Ui,
+        models: &[LocalModel],
+        running: &[RunningModel],
+        bench_running: bool,
+    ) {
         kit::panel(
             ui,
             ic!(TIMER, "Benchmark"),
-            Some("Runs one non-streaming generation and reports Ollama's own timing counters."),
+            Some(tr(
+                "Runs one non-streaming generation and reports Ollama's own timing counters.",
+            )),
             |ui| {
                 kit::form(ui, "bench_form", |ui| {
-                    kit::field(ui, "Model", None);
+                    kit::field(ui, tr("Model"), None);
                     egui::ComboBox::from_id_salt("bench_model")
                         .selected_text(if self.bench_model.is_empty() {
-                            "Select…"
+                            tr("Select…")
                         } else {
                             &self.bench_model
                         })
                         .width(360.0)
                         .show_ui(ui, |ui| {
-                            for m in &models {
+                            for m in models {
                                 ui.selectable_value(&mut self.bench_model, m.name.clone(), &m.name);
                             }
                         });
                     ui.end_row();
-                    kit::field(ui, "Prompt", None);
+                    kit::field(ui, tr("Prompt"), None);
                     ui.add(
                         egui::TextEdit::multiline(&mut self.bench_prompt)
                             .desired_rows(3)
-                            .desired_width(560.0),
+                            .desired_width(ui.available_width().min(560.0)),
                     );
                     ui.end_row();
-                    kit::field(ui, "Tokens to generate", None);
+                    kit::field(ui, tr("Tokens to generate"), None);
                     ui.add(egui::DragValue::new(&mut self.bench_tokens).range(16..=4096));
                     ui.end_row();
-                    kit::field(ui, "Context", None);
+                    kit::field(ui, tr("Context"), None);
                     ui.horizontal(|ui| {
                         crate::views::models::context_picker(ui, "bench_ctx", &mut self.bench_ctx)
                     });
@@ -234,7 +263,7 @@ impl App {
                     }
                     if bench_running {
                         ui.spinner();
-                        ui.label("Running…");
+                        ui.label(tr("Running…"));
                     }
                     if let Some(r) = running.iter().find(|r| r.name == self.bench_model) {
                         let ctx = r
@@ -243,82 +272,87 @@ impl App {
                             .unwrap_or_default();
                         kit::badge(
                             ui,
-                            format!("loaded · {}{ctx}", r.processor()),
+                            format!(
+                                "{}{ctx}",
+                                trf!("loaded · {processor}", processor = r.processor())
+                            ),
                             crate::app::GREEN,
                         );
                     }
                 });
             },
         );
+    }
 
-        if !benchmarks.is_empty() {
-            kit::panel_with_actions(
-                ui,
-                "Results",
-                |ui| {
-                    if ui.button("Clear results").clicked() {
-                        self.ctl.backend.clear_benchmarks();
-                    }
-                },
-                |ui| {
-                    egui::Grid::new("bench_results")
-                        .striped(true)
-                        .num_columns(10)
-                        .spacing([28.0, 12.0])
-                        .show(ui, |ui| {
-                            for h in [
-                                "Time",
-                                "Model",
-                                "Context",
-                                "Processor",
-                                "Server",
-                                "Prompt tok/s",
-                                "Gen tok/s",
-                                "Tokens",
-                                "Load",
-                                "Total",
-                            ] {
-                                ui.label(RichText::new(h).weak());
-                            }
-                            ui.end_row();
-                            for b in benchmarks.iter().rev() {
-                                ui.label(&b.when);
-                                ui.label(RichText::new(&b.model).monospace().strong());
-                                let requested = b
-                                    .num_ctx
+    fn bench_results(&mut self, ui: &mut egui::Ui, benchmarks: &[BenchRecord]) {
+        kit::panel_with_actions(
+            ui,
+            tr("Results"),
+            |ui| {
+                if ui.button(tr("Clear results")).clicked() {
+                    self.ctl.backend.clear_benchmarks();
+                }
+            },
+            |ui| {
+                egui::Grid::new("bench_results")
+                    .striped(true)
+                    .num_columns(10)
+                    .spacing([28.0, 12.0])
+                    .show(ui, |ui| {
+                        for h in [
+                            tr("Time"),
+                            tr("Model"),
+                            tr("Context"),
+                            tr("Processor"),
+                            tr("Server"),
+                            tr("Prompt tok/s"),
+                            tr("Gen tok/s"),
+                            tr("Tokens"),
+                            tr("Load"),
+                            tr("Total"),
+                        ] {
+                            ui.label(RichText::new(h).weak());
+                        }
+                        ui.end_row();
+                        for b in benchmarks.iter().rev() {
+                            ui.label(&b.when);
+                            ui.label(RichText::new(&b.model).monospace().strong());
+                            let requested = b
+                                .num_ctx
+                                .map(|c| c.to_string())
+                                .unwrap_or_else(|| "auto".into());
+                            ui.label(
+                                b.loaded_ctx
                                     .map(|c| c.to_string())
-                                    .unwrap_or_else(|| "auto".into());
-                                ui.label(
-                                    b.loaded_ctx
-                                        .map(|c| c.to_string())
-                                        .unwrap_or_else(|| requested.clone()),
-                                )
-                                .on_hover_text(format!(
-                                    "Requested: {requested}\nLoaded: {}",
-                                    b.loaded_ctx
-                                        .map(|c| c.to_string())
-                                        .unwrap_or_else(|| "unknown".into())
-                                ));
-                                ui.label(b.processor.as_deref().unwrap_or("-"));
-                                server_cell(ui, b);
-                                ui.label(format!("{:.1}", b.stats.prompt_tps()));
-                                ui.label(
-                                    RichText::new(format!("{:.1}", b.stats.gen_tps()))
-                                        .size(18.0)
-                                        .strong(),
-                                );
-                                ui.label(format!(
-                                    "{} + {}",
-                                    b.stats.prompt_eval_count, b.stats.eval_count
-                                ));
-                                ui.label(format!("{:.2}s", b.stats.load_duration as f64 / 1e9));
-                                ui.label(format!("{:.2}s", b.stats.total_duration as f64 / 1e9));
-                                ui.end_row();
-                            }
-                        });
-                },
-            );
-        }
+                                    .unwrap_or_else(|| requested.clone()),
+                            )
+                            .on_hover_text(trf!(
+                                "Requested: {requested}\nLoaded: {loaded}",
+                                requested = requested,
+                                loaded = b
+                                    .loaded_ctx
+                                    .map(|c| c.to_string())
+                                    .unwrap_or_else(|| tr("unknown").into())
+                            ));
+                            ui.label(b.processor.as_deref().unwrap_or("-"));
+                            server_cell(ui, b);
+                            ui.label(format!("{:.1}", b.stats.prompt_tps()));
+                            ui.label(
+                                RichText::new(format!("{:.1}", b.stats.gen_tps()))
+                                    .size(18.0)
+                                    .strong(),
+                            );
+                            ui.label(format!(
+                                "{} + {}",
+                                b.stats.prompt_eval_count, b.stats.eval_count
+                            ));
+                            ui.label(format!("{:.2}s", b.stats.load_duration as f64 / 1e9));
+                            ui.label(format!("{:.2}s", b.stats.total_duration as f64 / 1e9));
+                            ui.end_row();
+                        }
+                    });
+            },
+        );
     }
 }
 

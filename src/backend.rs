@@ -14,6 +14,7 @@ use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, System};
 use crate::chat_store::{ChatConfig, ChatStore, ChatSummary, SavedChat, SavedEntry, SavedReply};
 use crate::config;
 use crate::gpu::{self, GpuInfo};
+use crate::i18n::tr;
 use crate::logs::LogBuffer;
 use crate::ollama::{ChatMessage, Client, GenerateStats, LocalModel, RunningModel, ShowResponse};
 use crate::util::Repaint;
@@ -571,6 +572,21 @@ impl Backend {
             start: Instant::now(),
             chat_store: Arc::new(Mutex::new(chat_store)),
         };
+        // Reopen the latest chat rather than starting (and saving) an empty one.
+        let latest = backend
+            .shared
+            .lock()
+            .unwrap()
+            .saved_chats
+            .first()
+            .map(|c| c.id.clone());
+        if let Some(id) = latest
+            && let Err(e) = backend.load_saved_chat(&id)
+        {
+            backend
+                .logs
+                .app_error(format!("Failed to open the latest chat: {e:#}"));
+        }
         backend.redetect_gpus();
         let b = backend.clone();
         std::thread::Builder::new()
@@ -927,7 +943,8 @@ impl Backend {
     fn task(
         &self,
         model: &str,
-        label: &'static str,
+        // Failure message with {model} and {error}, marked with `tr_key!`.
+        failed: &'static str,
         f: impl FnOnce(&Client) -> anyhow::Result<String> + Send + 'static,
     ) {
         let me = self.clone();
@@ -943,7 +960,9 @@ impl Backend {
                     s.notify(msg, false);
                 }
                 Err(e) => {
-                    let msg = format!("{label} {model} failed: {e:#}");
+                    let msg = tr(failed)
+                        .replace("{model}", &model)
+                        .replace("{error}", &format!("{e:#}"));
                     me.logs.app_error(&msg);
                     s.notify(msg, true);
                 }
@@ -956,26 +975,38 @@ impl Backend {
 
     pub fn load(&self, model: &str, num_ctx: Option<u32>) {
         let m = model.to_string();
-        self.task(model, "Load", move |c| {
-            c.load(&m, num_ctx)?;
-            Ok(format!("Loaded {m}"))
-        });
+        self.task(
+            model,
+            tr_key!("Loading {model} failed: {error}"),
+            move |c| {
+                c.load(&m, num_ctx)?;
+                Ok(trf!("Loaded {model}", model = m))
+            },
+        );
     }
 
     pub fn unload(&self, model: &str) {
         let m = model.to_string();
-        self.task(model, "Unload", move |c| {
-            c.unload(&m)?;
-            Ok(format!("Unloaded {m}"))
-        });
+        self.task(
+            model,
+            tr_key!("Unloading {model} failed: {error}"),
+            move |c| {
+                c.unload(&m)?;
+                Ok(trf!("Unloaded {model}", model = m))
+            },
+        );
     }
 
     pub fn delete(&self, model: &str) {
         let m = model.to_string();
-        self.task(model, "Delete", move |c| {
-            c.delete(&m)?;
-            Ok(format!("Deleted {m}"))
-        });
+        self.task(
+            model,
+            tr_key!("Deleting {model} failed: {error}"),
+            move |c| {
+                c.delete(&m)?;
+                Ok(trf!("Deleted {model}", model = m))
+            },
+        );
     }
 
     pub fn show(&self, model: &str) {
@@ -1028,10 +1059,17 @@ impl Backend {
                 }
             }
             match res {
-                Ok(()) => s.notify(format!("Pulled {model}"), false),
+                Ok(()) => s.notify(trf!("Pulled {model}", model = model), false),
                 Err(e) => {
                     me.logs.app_error(format!("Pull {model} failed: {e:#}"));
-                    s.notify(format!("Pull {model} failed: {e:#}"), true);
+                    s.notify(
+                        trf!(
+                            "Pulling {model} failed: {error}",
+                            model = model,
+                            error = format!("{e:#}")
+                        ),
+                        true,
+                    );
                 }
             }
             drop(s);
@@ -1088,7 +1126,10 @@ impl Backend {
                     }
                     s.benchmarks.push(record);
                 }
-                Err(e) => s.notify(format!("Benchmark failed: {e:#}"), true),
+                Err(e) => s.notify(
+                    trf!("Benchmark failed: {error}", error = format!("{e:#}")),
+                    true,
+                ),
             }
             drop(s);
             me.refresh_now();

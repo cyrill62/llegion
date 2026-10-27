@@ -1,6 +1,8 @@
 //! llegion: a UI-independent core plus two front-ends behind cargo features,
 //! the egui desktop app (`gui`, binary `llegion`) and the terminal UI (`tui`, binary `llegion-tui`).
 
+#[macro_use]
+pub mod i18n;
 #[cfg(feature = "gui")]
 #[macro_use]
 mod icons;
@@ -11,9 +13,11 @@ pub mod config;
 pub mod control;
 pub mod ferron;
 pub mod gpu;
+pub mod install;
 pub mod logs;
 pub mod ollama;
 pub mod process;
+pub mod relay;
 pub mod util;
 
 #[cfg(feature = "gui")]

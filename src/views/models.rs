@@ -1,6 +1,7 @@
 use eframe::egui::{self, RichText};
 
 use crate::app::{AMBER, App, GREEN, RED};
+use crate::i18n::tr;
 use crate::ollama::RunningModel;
 use crate::util::{CONTEXT_PRESETS, ctx_label, format_bytes, format_duration_secs};
 use crate::views::kit;
@@ -57,7 +58,7 @@ impl App {
             .num_columns(7)
             .spacing([28.0, 12.0])
             .show(ui, |ui| {
-                for h in ["Model", "Size", "VRAM", "Processor", "Context", "Unloads in", ""] {
+                for h in [tr("Model"), tr("Size"), "VRAM", tr("Processor"), tr("Context"), tr("Unloads in"), ""] {
                     ui.label(RichText::new(h).weak());
                 }
                 ui.end_row();
@@ -72,7 +73,7 @@ impl App {
                         _ => AMBER,
                     };
                     kit::badge(ui, proc, color).on_hover_text(
-                        "Share of the model held in GPU memory. Anything on CPU is much slower — reduce the context size or use a smaller quantization.",
+                        tr("Share of the model held in GPU memory. Anything on CPU is much slower — reduce the context size or use a smaller quantization."),
                     );
                     ui.label(
                         m.context_length
@@ -106,13 +107,15 @@ impl App {
                 s.connected,
             )
         };
-        ui.heading("Models");
+        ui.heading(tr("Models"));
         ui.add_space(8.0);
         if !connected {
             kit::panel(ui, ic!(WARNING, "Not connected"), None, |ui| {
                 ui.label(
-                    RichText::new("The Ollama API is unreachable. Check Settings → Connection.")
-                        .color(RED),
+                    RichText::new(tr(
+                        "The Ollama API is unreachable. Check Settings → Connection.",
+                    ))
+                    .color(RED),
                 );
             });
         }
@@ -122,19 +125,19 @@ impl App {
         ui.columns(3, |cols| {
             kit::tile(
                 &mut cols[0],
-                "Running",
+                tr("Running"),
                 RichText::new(running.len().to_string()),
                 Some(format!("{} in VRAM", format_bytes(vram))),
             );
             kit::tile(
                 &mut cols[1],
-                "Downloaded",
+                tr("Downloaded"),
                 RichText::new(models.len().to_string()),
                 Some("models".into()),
             );
             kit::tile(
                 &mut cols[2],
-                "Disk usage",
+                tr("Disk usage"),
                 RichText::new(format_bytes(disk)),
                 None,
             );
@@ -143,7 +146,7 @@ impl App {
 
         kit::panel(ui, ic!(GPU, "Running models"), None, |ui| {
             if running.is_empty() {
-                ui.label(RichText::new("No model is currently loaded in memory.").weak());
+                ui.label(RichText::new(tr("No model is currently loaded in memory.")).weak());
             } else {
                 self.running_table(ui, &running);
             }
@@ -152,12 +155,14 @@ impl App {
         kit::panel(
             ui,
             ic!(DOWNLOAD, "Pull a model"),
-            Some("Download a model from the Ollama library by name and tag."),
+            Some(tr(
+                "Download a model from the Ollama library by name and tag.",
+            )),
             |ui| {
                 ui.horizontal(|ui| {
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut self.pull_name)
-                            .hint_text("e.g. llama3.2:3b, qwen3:8b, gemma3:12b-it-qat")
+                            .hint_text(tr("e.g. llama3.2:3b, qwen3:8b, gemma3:12b-it-qat"))
                             .desired_width(420.0),
                     );
                     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
@@ -201,11 +206,16 @@ impl App {
                                     .text(text)
                                     .animate(true),
                             );
-                            if ui.button("Cancel").clicked() {
+                            if ui.button(tr("Cancel")).clicked() {
                                 p.cancel.store(true, std::sync::atomic::Ordering::Relaxed);
                             }
                         }
-                        if p.done && ui.button(icon!(CLOSE)).on_hover_text("Dismiss").clicked() {
+                        if p.done
+                            && ui
+                                .button(icon!(CLOSE))
+                                .on_hover_text(tr("Dismiss"))
+                                .clicked()
+                        {
                             clear.push(name.clone());
                         }
                     });
@@ -224,11 +234,11 @@ impl App {
                 ui.label(icon!(SEARCH));
                 ui.add(
                     egui::TextEdit::singleline(&mut self.model_filter)
-                        .hint_text("Filter by name")
+                        .hint_text(tr("Filter by name"))
                         .desired_width(260.0),
                 );
                 ui.add_space(16.0);
-                ui.label("Load with context");
+                ui.label(tr("Load with context"));
                 context_picker(ui, "load_ctx", &mut self.load_ctx);
             });
             ui.add_space(10.0);
@@ -239,7 +249,15 @@ impl App {
                 .num_columns(7)
                 .spacing([28.0, 12.0])
                 .show(ui, |ui| {
-                    for h in ["Name", "Params", "Quant", "Family", "Size", "Modified", ""] {
+                    for h in [
+                        tr("Name"),
+                        tr("Params"),
+                        tr("Quant"),
+                        tr("Family"),
+                        tr("Size"),
+                        tr("Modified"),
+                        "",
+                    ] {
                         ui.label(RichText::new(h).weak());
                     }
                     ui.end_row();
@@ -252,7 +270,7 @@ impl App {
                             ui.label(RichText::new(&m.name).monospace().strong())
                                 .on_hover_text(&m.digest);
                             if is_running {
-                                kit::badge(ui, "loaded", GREEN);
+                                kit::badge(ui, tr("loaded"), GREEN);
                             }
                         });
                         ui.label(&m.details.parameter_size);
@@ -273,17 +291,25 @@ impl App {
                                 let ctx = (self.load_ctx > 0).then_some(self.load_ctx);
                                 self.ctl.backend.load(&m.name, ctx);
                             }
-                            if ui.button(icon!(INFO)).on_hover_text("Details").clicked() {
+                            if ui
+                                .button(icon!(INFO))
+                                .on_hover_text(tr("Details"))
+                                .clicked()
+                            {
                                 self.selected_model = Some(m.name.clone());
                                 self.ctl.backend.show(&m.name);
                             }
-                            if ui.button(icon!(TIMER)).on_hover_text("Benchmark").clicked() {
+                            if ui
+                                .button(icon!(TIMER))
+                                .on_hover_text(tr("Benchmark"))
+                                .clicked()
+                            {
                                 self.bench_model = m.name.clone();
                                 self.tab = crate::app::Tab::Performance;
                             }
                             if ui
                                 .button(RichText::new(icon!(DELETE)).color(RED))
-                                .on_hover_text("Delete")
+                                .on_hover_text(tr("Delete"))
                                 .clicked()
                             {
                                 self.confirm_delete = Some(m.name.clone());
@@ -302,19 +328,19 @@ impl App {
         let Some(name) = self.confirm_delete.clone() else {
             return;
         };
-        egui::Window::new("Delete model?")
+        egui::Window::new(tr("Delete model?"))
             .collapsible(false)
             .resizable(false)
             .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
             .show(ctx, |ui| {
-                ui.label(format!("Permanently delete {name} from disk?"));
+                ui.label(trf!("Permanently delete {name} from disk?", name = name));
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new("Delete").color(RED)).clicked() {
+                    if ui.button(RichText::new(tr("Delete")).color(RED)).clicked() {
                         self.ctl.backend.delete(&name);
                         self.confirm_delete = None;
                     }
-                    if ui.button("Cancel").clicked() {
+                    if ui.button(tr("Cancel")).clicked() {
                         self.confirm_delete = None;
                     }
                 });
@@ -355,17 +381,17 @@ impl App {
                                 ui.label(v);
                                 ui.end_row();
                             };
-                            row("Family", d.details.family.clone());
-                            row("Parameters", d.details.parameter_size.clone());
-                            row("Quantization", d.details.quantization_level.clone());
-                            row("Format", d.details.format.clone());
+                            row(tr("Family"), d.details.family.clone());
+                            row(tr("Parameters"), d.details.parameter_size.clone());
+                            row(tr("Quantization"), d.details.quantization_level.clone());
+                            row(tr("Format"), d.details.format.clone());
                             row(
-                                "Native context",
+                                tr("Native context"),
                                 d.native_context_length()
                                     .map(|c| c.to_string())
                                     .unwrap_or_else(|| "-".into()),
                             );
-                            row("Capabilities", d.capabilities.join(", "));
+                            row(tr("Capabilities"), d.capabilities.join(", "));
                         });
                     ui.add_space(10.0);
                     let tab_id = egui::Id::unique("model_info_tab");
@@ -379,11 +405,11 @@ impl App {
                         .collect::<Vec<_>>()
                         .join("\n");
                     let sections = [
-                        ("Parameters", d.parameters.as_str()),
-                        ("Template", d.template.as_str()),
-                        ("Modelfile", d.modelfile.as_str()),
-                        ("Model info", model_info.as_str()),
-                        ("License", d.license.as_str()),
+                        (tr("Parameters"), d.parameters.as_str()),
+                        (tr("Template"), d.template.as_str()),
+                        (tr("Modelfile"), d.modelfile.as_str()),
+                        (tr("Model info"), model_info.as_str()),
+                        (tr("License"), d.license.as_str()),
                     ];
                     let mut options = Vec::new();
                     for (i, (label, content)) in sections.iter().enumerate() {

@@ -11,6 +11,7 @@ use ratatui::widgets::{Axis, Cell, Chart, Dataset, GraphType, Paragraph, Row, Ta
 use super::kit::{self, GREEN};
 use super::{Field, Tui};
 use crate::backend::{Sample, preferred_model};
+use crate::i18n::tr;
 use crate::util::{CONTEXT_PRESETS, ctx_label, ctx_short};
 
 const GIB: f64 = 1024.0 * 1024.0 * 1024.0;
@@ -153,13 +154,13 @@ impl Tui {
 
     pub(super) fn performance_hints(&self) -> Vec<(&'static str, &'static str)> {
         vec![
-            ("Enter", "run benchmark"),
-            ("m", "model"),
-            ("c", "context"),
-            ("+/-", "tokens"),
-            ("e", "prompt"),
-            ("↑↓", "select result"),
-            ("x", "clear results"),
+            ("Enter", tr("run benchmark")),
+            ("m", tr("model")),
+            ("c", tr("context")),
+            ("+/-", tr("tokens")),
+            ("e", tr("prompt")),
+            ("↑↓", tr("select result")),
+            ("x", tr("clear results")),
         ]
     }
 
@@ -217,7 +218,7 @@ impl Tui {
             f,
             ram_area,
             Plot {
-                title: "Memory (GiB)",
+                title: tr("Memory (GiB)"),
                 max: ram_total,
                 unit: "",
             },
@@ -246,7 +247,7 @@ impl Tui {
             f,
             util_area,
             Plot {
-                title: "GPU utilization",
+                title: tr("GPU utilization"),
                 max: 100.0,
                 unit: "%",
             },
@@ -272,7 +273,7 @@ impl Tui {
             f,
             vram_area,
             Plot {
-                title: "VRAM (GiB)",
+                title: tr("VRAM (GiB)"),
                 max: vram_max,
                 unit: "",
             },
@@ -283,10 +284,10 @@ impl Tui {
 
         // Benchmark form.
         let mut model_line = vec![
-            kit::label("Model"),
+            kit::label(tr("Model")),
             Span::styled(
                 if self.bench.model.is_empty() {
-                    "none downloaded".to_string()
+                    tr("none downloaded").to_string()
                 } else {
                     self.bench.model.clone()
                 },
@@ -299,24 +300,27 @@ impl Tui {
                 .map(|c| format!(" · {} ctx", ctx_short(c)))
                 .unwrap_or_default();
             model_line.push(Span::styled(
-                format!("  loaded · {}{ctx}", r.processor()),
+                format!(
+                    "  {}{ctx}",
+                    trf!("loaded · {processor}", processor = r.processor())
+                ),
                 Style::new().fg(GREEN),
             ));
         }
         let mut form_lines = vec![
             Line::from(model_line),
-            kit::kv("Prompt", Span::raw(self.bench.prompt.clone())),
-            kit::kv("Tokens", Span::raw(self.bench.tokens.to_string())),
-            kit::kv("Context", Span::raw(ctx_label(self.bench.ctx))),
+            kit::kv(tr("Prompt"), Span::raw(self.bench.prompt.clone())),
+            kit::kv(tr("Tokens"), Span::raw(self.bench.tokens.to_string())),
+            kit::kv(tr("Context"), Span::raw(ctx_label(self.bench.ctx))),
         ];
         if bench_running {
             form_lines.push(Line::from(Span::styled(
-                "Running…",
+                tr("Running…"),
                 Style::new().fg(kit::AMBER),
             )));
         }
         f.render_widget(
-            Paragraph::new(form_lines).block(kit::panel("Benchmark")),
+            Paragraph::new(form_lines).block(kit::panel(tr("Benchmark"))),
             form,
         );
 
@@ -327,7 +331,7 @@ impl Tui {
             let requested = b
                 .num_ctx
                 .map(|c| c.to_string())
-                .unwrap_or_else(|| "auto".into());
+                .unwrap_or_else(|| tr("auto").into());
             Row::new(vec![
                 Cell::from(b.when.clone()),
                 Cell::from(b.model.clone().bold()),
@@ -348,16 +352,16 @@ impl Tui {
             ])
         });
         let header = Row::new([
-            "Time",
-            "Model",
-            "Context",
-            "Processor",
-            "Server",
-            "Prompt t/s",
-            "Gen t/s",
-            "Tokens",
-            "Load",
-            "Total",
+            tr("Time"),
+            tr("Model"),
+            tr("Context"),
+            tr("Processor"),
+            tr("Server"),
+            tr("Prompt t/s"),
+            tr("Gen t/s"),
+            tr("Tokens"),
+            tr("Load"),
+            tr("Total"),
         ])
         .style(Style::new().dark_gray());
         let widths = [
@@ -379,7 +383,7 @@ impl Tui {
             Table::new(rows, widths)
                 .header(header)
                 .row_highlight_style(kit::selected())
-                .block(kit::panel("Results")),
+                .block(kit::panel(tr("Results"))),
             table_area,
             &mut state,
         );
@@ -389,17 +393,18 @@ impl Tui {
             .rev()
             .nth(self.bench.sel)
             .map(|b| {
-                let requested = b.num_ctx.map_or("auto".into(), |c| c.to_string());
-                format!(
-                    "requested context {requested} · {}",
-                    b.server_details().replace('\n', "  ")
+                let requested = b.num_ctx.map_or(tr("auto").into(), |c| c.to_string());
+                trf!(
+                    "requested context {requested} · {details}",
+                    requested = requested,
+                    details = b.server_details().replace('\n', "  ")
                 )
             })
             .unwrap_or_default();
         f.render_widget(
             Paragraph::new(detail)
                 .wrap(ratatui::widgets::Wrap { trim: true })
-                .block(kit::panel("Server configuration of the selected run")),
+                .block(kit::panel(tr("Server configuration of the selected run"))),
             detail_area,
         );
     }

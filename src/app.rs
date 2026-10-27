@@ -7,6 +7,7 @@ use eframe::egui::{self, Color32, RichText};
 use crate::config::Settings;
 use crate::control::Control;
 use crate::ferron;
+use crate::i18n::tr;
 use crate::logs::{Level, LogLine};
 use crate::util::Repaint;
 use crate::views::kit;
@@ -127,6 +128,14 @@ pub struct App {
     pub launcher_selected: String,
     /// Agent icons by (key, dark theme), decoded on first use.
     pub launcher_icons: HashMap<(&'static str, bool), egui::TextureHandle>,
+    /// Install methods of each agent missing from this machine; `None` until checked.
+    pub launcher_missing: Arc<Mutex<Option<crate::install::Missing>>>,
+    /// Window focus last frame: agents are checked again when it comes back (after an install).
+    pub launcher_focused: bool,
+    /// Folder the launched agent works in.
+    pub launcher_dir: String,
+    /// Token-adding relay the launched agents talk to, started on first need.
+    pub launch_relay: Option<crate::relay::Relay>,
     pub markdown_cache: egui_commonmark::CommonMarkCache,
 
     pub log_view: LogView,
@@ -134,6 +143,8 @@ pub struct App {
     // Settings tab
     pub reveal_tokens: bool,
     pub new_token_label: String,
+    pub new_backend_url: String,
+    pub backend_tests: crate::views::settings::BackendTests,
     pub proxy_test: Arc<Mutex<Option<(bool, String)>>>,
     pub confirm_reset: bool,
     pub settings_pane: SettingsPane,
@@ -201,6 +212,12 @@ impl App {
             chat_markdown: true,
             launcher_selected: "claude".into(),
             launcher_icons: HashMap::new(),
+            launcher_missing: Arc::new(Mutex::new(None)),
+            launcher_focused: false,
+            launch_relay: None,
+            launcher_dir: directories::BaseDirs::new()
+                .map(|d| d.home_dir().display().to_string())
+                .unwrap_or_default(),
             markdown_cache: Default::default(),
             log_view: LogView {
                 filter: String::new(),
@@ -216,6 +233,8 @@ impl App {
             },
             reveal_tokens: false,
             new_token_label: String::new(),
+            new_backend_url: String::new(),
+            backend_tests: Default::default(),
             proxy_test: Arc::new(Mutex::new(None)),
             confirm_reset: false,
             settings_pane: SettingsPane::Connection,
@@ -269,11 +288,14 @@ impl App {
             let r = if connected {
                 kit::badge(
                     ui,
-                    format!("Connected · v{}", version.unwrap_or_default()),
+                    trf!(
+                        "Connected · v{version}",
+                        version = version.unwrap_or_default()
+                    ),
                     GREEN,
                 )
             } else {
-                kit::badge(ui, "Disconnected", RED)
+                kit::badge(ui, tr("Disconnected"), RED)
             };
             let tip = match error {
                 Some(err) => format!("{}\n{err}", self.ctl.settings.connection.base_url),
@@ -289,7 +311,7 @@ impl App {
                 };
                 if ui
                     .button(theme_icon)
-                    .on_hover_text("Toggle theme")
+                    .on_hover_text(tr("Toggle theme"))
                     .clicked()
                 {
                     self.ctl.settings.ui.dark_mode = !self.ctl.settings.ui.dark_mode;
@@ -299,7 +321,7 @@ impl App {
                 }
                 if ui
                     .button(icon!(REFRESH))
-                    .on_hover_text("Refresh now")
+                    .on_hover_text(tr("Refresh now"))
                     .clicked()
                 {
                     self.ctl.backend.refresh_now();
@@ -314,9 +336,9 @@ impl App {
 
     pub fn server_controls(&mut self, ui: &mut egui::Ui) {
         if !self.ctl.settings.server.manage_server {
-            kit::badge(ui, "External server", Color32::GRAY).on_hover_text(
+            kit::badge(ui, tr("External server"), Color32::GRAY).on_hover_text(tr(
                 "Enable \"Manage server\" in Settings to start/stop Ollama from here.",
-            );
+            ));
             return;
         }
         if self.ctl.ollama_proc.is_running() {
@@ -328,9 +350,9 @@ impl App {
             }
             kit::badge(
                 ui,
-                format!(
-                    "Server running · pid {}",
-                    self.ctl.ollama_proc.pid().unwrap_or(0)
+                trf!(
+                    "Server running · pid {pid}",
+                    pid = self.ctl.ollama_proc.pid().unwrap_or(0)
                 ),
                 GREEN,
             );
@@ -338,7 +360,7 @@ impl App {
             if ui.button(ic!(PLAY, "Start server")).clicked() {
                 self.ctl.start_ollama();
             }
-            kit::badge(ui, "Server stopped", AMBER);
+            kit::badge(ui, tr("Server stopped"), AMBER);
         }
     }
 
@@ -349,7 +371,7 @@ impl App {
         if self.ctl.ferron_proc.is_running() {
             if ui
                 .button(icon!(STOP))
-                .on_hover_text("Stop HTTPS proxy")
+                .on_hover_text(tr("Stop HTTPS proxy"))
                 .clicked()
             {
                 self.ctl.stop_ferron();
@@ -359,7 +381,7 @@ impl App {
         } else {
             if ui
                 .button(icon!(PLAY))
-                .on_hover_text("Start HTTPS proxy")
+                .on_hover_text(tr("Start HTTPS proxy"))
                 .clicked()
             {
                 self.ctl.start_ferron();
@@ -370,9 +392,9 @@ impl App {
 
     fn nav(&mut self, ui: &mut egui::Ui) {
         let (toggle, tip) = if self.nav_open {
-            (icon!(PANEL_CLOSE), "Shrink the menu")
+            (icon!(PANEL_CLOSE), tr("Shrink the menu"))
         } else {
-            (icon!(PANEL_OPEN), "Expand the menu")
+            (icon!(PANEL_OPEN), tr("Expand the menu"))
         };
         if ui.button(toggle).on_hover_text(tip).clicked() {
             self.nav_open = !self.nav_open;
@@ -394,7 +416,7 @@ impl App {
                 r = r.on_hover_text(label);
             }
             let r = r.on_disabled_hover_text(
-                    "GPU selection applies to a server started by this app: enable \"Manage the server\" in Settings → Server.",
+                    tr("GPU selection applies to a server started by this app: enable \"Manage the server\" in Settings → Server."),
                 );
             if r.clicked() {
                 self.tab = tab;
@@ -406,13 +428,13 @@ impl App {
             if self.draft_dirty() {
                 ui.label(
                     RichText::new(if self.nav_open {
-                        "● Unsaved settings"
+                        tr("● Unsaved settings")
                     } else {
                         "●"
                     })
                     .color(AMBER),
                 )
-                .on_hover_text("Unsaved settings");
+                .on_hover_text(tr("Unsaved settings"));
             }
             if self.nav_open {
                 ui.label(RichText::new(format!("v{}", include_str!("../VERSION").trim())).weak());

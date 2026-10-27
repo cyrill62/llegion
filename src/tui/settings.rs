@@ -10,6 +10,7 @@ use ratatui::widgets::{Paragraph, Wrap};
 use super::kit::{self, AMBER, GREEN};
 use super::{Confirm, Editing, Field, Hit, Tui};
 use crate::config::{ApiToken, LogSource, Settings, TlsMode};
+use crate::i18n::tr;
 use crate::util::{generate_token, mask_token};
 
 enum Kind {
@@ -44,13 +45,28 @@ const TLS_MODES: [TlsMode; 4] = [
     TlsMode::Off,
 ];
 const TLS_LABELS: [&str; 4] = [
-    "self-signed",
-    "Let's Encrypt",
-    "my certificate",
-    "off (HTTP)",
+    tr_key!("self-signed"),
+    tr_key!("Let's Encrypt"),
+    tr_key!("my certificate"),
+    tr_key!("off (HTTP)"),
 ];
 const SOURCES: [LogSource; 3] = [LogSource::Managed, LogSource::File, LogSource::Journal];
-const SOURCE_LABELS: [&str; 3] = ["managed server only", "log file", "systemd journal"];
+const SOURCE_LABELS: [&str; 3] = [
+    tr_key!("managed server only"),
+    tr_key!("log file"),
+    tr_key!("systemd journal"),
+];
+
+/// "System", then the native names of `i18n::LANGUAGES`, in the same order.
+const LANGUAGE_LABELS: [&str; 7] = [
+    tr_key!("System"),
+    "English",
+    "Français",
+    "Deutsch",
+    "Español",
+    "Italiano",
+    "中文",
+];
 
 fn items() -> Vec<Item> {
     let item = |section, label, help, kind| Item {
@@ -61,62 +77,62 @@ fn items() -> Vec<Item> {
     };
     vec![
         item(
-            "Connection",
-            "API URL",
-            "Ollama API this app talks to (local, or a remote proxy).",
+            tr_key!("Connection"),
+            tr_key!("API URL"),
+            tr_key!("Ollama API this app talks to (local, or a remote proxy)."),
             Kind::Text(|s| &mut s.connection.base_url),
         ),
         item(
-            "Connection",
-            "API token",
-            "Bearer token sent to a token-protected server.",
+            tr_key!("Connection"),
+            tr_key!("API token"),
+            tr_key!("Bearer token sent to a token-protected server."),
             Kind::Secret(|s| &mut s.connection.api_token),
         ),
         item(
-            "Connection",
-            "Accept invalid certs",
-            "For self-signed HTTPS proxies.",
+            tr_key!("Connection"),
+            tr_key!("Accept invalid certs"),
+            tr_key!("For self-signed HTTPS proxies."),
             Kind::Bool(|s| &mut s.connection.accept_invalid_certs),
         ),
         item(
-            "Server",
-            "Manage server",
-            "Start and stop `ollama serve` from this app (S / R keys).",
+            tr_key!("Server"),
+            tr_key!("Manage server"),
+            tr_key!("Start and stop `ollama serve` from this app (S / R keys)."),
             Kind::Bool(|s| &mut s.server.manage_server),
         ),
         item(
-            "Server",
-            "Start automatically",
-            "Start the server when this app starts.",
+            tr_key!("Server"),
+            tr_key!("Start automatically"),
+            tr_key!("Start the server when this app starts."),
             Kind::Bool(|s| &mut s.server.auto_start),
         ),
         item(
-            "Server",
-            "Stop on exit",
-            "Stop the managed server when this app quits.",
+            tr_key!("Server"),
+            tr_key!("Stop on exit"),
+            tr_key!("Stop the managed server when this app quits."),
             Kind::Bool(|s| &mut s.server.stop_on_exit),
         ),
         item(
-            "Server",
-            "Restart on crash",
-            "At most 3 times per minute.",
+            tr_key!("Server"),
+            tr_key!("Restart on crash"),
+            tr_key!("At most 3 times per minute."),
             Kind::Bool(|s| &mut s.server.restart_on_crash),
         ),
         item(
-            "Server",
-            "ollama binary",
-            "Path to the ollama executable.",
+            tr_key!("Server"),
+            tr_key!("ollama binary"),
+            tr_key!("Path to the ollama executable."),
             Kind::Text(|s| &mut s.server.ollama_path),
         ),
         item(
-            "Server",
-            "Bind host",
-            "Forced to 127.0.0.1 while the proxy is enabled.",
+            tr_key!("Server"),
+            tr_key!("Bind host"),
+            tr_key!("Forced to 127.0.0.1 while the proxy is enabled."),
             Kind::Text(|s| &mut s.server.host),
         ),
         item(
-            "Server",
-            "Port",
+            tr_key!("Server"),
+            tr_key!("Port"),
             "",
             Kind::Num(
                 |s| s.server.port.into(),
@@ -124,57 +140,59 @@ fn items() -> Vec<Item> {
             ),
         ),
         item(
-            "Server",
-            "Context window",
-            "Default for every model (OLLAMA_CONTEXT_LENGTH); 0 = auto. Accepts 32k.",
+            tr_key!("Server"),
+            tr_key!("Context window"),
+            tr_key!("Default for every model (OLLAMA_CONTEXT_LENGTH); 0 = auto. Accepts 32k."),
             Kind::Num(
                 |s| s.server.context_length.into(),
                 |s, v| s.server.context_length = v.min(1 << 20) as u32,
             ),
         ),
         item(
-            "Server",
-            "Keep alive",
-            "How long idle models stay loaded (OLLAMA_KEEP_ALIVE), e.g. 5m, 1h, -1.",
+            tr_key!("Server"),
+            tr_key!("Keep alive"),
+            tr_key!("How long idle models stay loaded (OLLAMA_KEEP_ALIVE), e.g. 5m, 1h, -1."),
             Kind::Text(|s| &mut s.server.keep_alive),
         ),
         item(
-            "Server",
-            "Max loaded models",
-            "0 = server default.",
+            tr_key!("Server"),
+            tr_key!("Max loaded models"),
+            tr_key!("0 = server default."),
             Kind::Num(
                 |s| s.server.max_loaded_models.into(),
                 |s, v| s.server.max_loaded_models = v as u32,
             ),
         ),
         item(
-            "Server",
-            "Parallel requests",
-            "Per model (OLLAMA_NUM_PARALLEL); 0 = server default.",
+            tr_key!("Server"),
+            tr_key!("Parallel requests"),
+            tr_key!("Per model (OLLAMA_NUM_PARALLEL); 0 = server default."),
             Kind::Num(
                 |s| s.server.num_parallel.into(),
                 |s, v| s.server.num_parallel = v as u32,
             ),
         ),
         item(
-            "Server",
-            "Max queue",
-            "0 = server default.",
+            tr_key!("Server"),
+            tr_key!("Max queue"),
+            tr_key!("0 = server default."),
             Kind::Num(
                 |s| s.server.max_queue.into(),
                 |s, v| s.server.max_queue = v as u32,
             ),
         ),
         item(
-            "Server",
-            "Flash attention",
-            "Less VRAM for long contexts.",
+            tr_key!("Server"),
+            tr_key!("Flash attention"),
+            tr_key!("Less VRAM for long contexts."),
             Kind::Bool(|s| &mut s.server.flash_attention),
         ),
         item(
-            "Server",
-            "KV cache type",
-            "Quantized cache (needs flash attention): q8_0 halves, q4_0 quarters its size.",
+            tr_key!("Server"),
+            tr_key!("KV cache type"),
+            tr_key!(
+                "Quantized cache (needs flash attention): q8_0 halves, q4_0 quarters its size."
+            ),
             Kind::Choice(
                 &KV_TYPES,
                 |s| {
@@ -187,56 +205,56 @@ fn items() -> Vec<Item> {
             ),
         ),
         item(
-            "Server",
-            "Models directory",
-            "Empty = default (OLLAMA_MODELS).",
+            tr_key!("Server"),
+            tr_key!("Models directory"),
+            tr_key!("Empty = default (OLLAMA_MODELS)."),
             Kind::Text(|s| &mut s.server.models_dir),
         ),
         item(
-            "Server",
-            "Allowed origins",
-            "OLLAMA_ORIGINS, comma separated.",
+            tr_key!("Server"),
+            tr_key!("Allowed origins"),
+            tr_key!("OLLAMA_ORIGINS, comma separated."),
             Kind::Text(|s| &mut s.server.origins),
         ),
         item(
-            "Server",
-            "Debug logging",
-            "OLLAMA_DEBUG=1.",
+            tr_key!("Server"),
+            tr_key!("Debug logging"),
+            tr_key!("OLLAMA_DEBUG=1."),
             Kind::Bool(|s| &mut s.server.debug_logging),
         ),
         item(
-            "Server",
-            "Extra environment",
-            "KEY=VALUE pairs separated by ';'.",
+            tr_key!("Server"),
+            tr_key!("Extra environment"),
+            tr_key!("KEY=VALUE pairs separated by ';'."),
             Kind::Lines(|s| &mut s.server.extra_env),
         ),
         item(
-            "Proxy",
-            "Enabled",
-            "Ferron in front of Ollama with HTTPS and bearer-token auth (P key).",
+            tr_key!("Proxy"),
+            tr_key!("Enabled"),
+            tr_key!("Ferron in front of Ollama with HTTPS and bearer-token auth (P key)."),
             Kind::Bool(|s| &mut s.proxy.enabled),
         ),
         item(
-            "Proxy",
-            "Start automatically",
+            tr_key!("Proxy"),
+            tr_key!("Start automatically"),
             "",
             Kind::Bool(|s| &mut s.proxy.auto_start),
         ),
         item(
-            "Proxy",
-            "ferron binary",
+            tr_key!("Proxy"),
+            tr_key!("ferron binary"),
             "",
             Kind::Text(|s| &mut s.proxy.ferron_path),
         ),
         item(
-            "Proxy",
-            "Listen host",
-            "0.0.0.0 = every interface.",
+            tr_key!("Proxy"),
+            tr_key!("Listen host"),
+            tr_key!("0.0.0.0 = every interface."),
             Kind::Text(|s| &mut s.proxy.listen_host),
         ),
         item(
-            "Proxy",
-            "Port",
+            tr_key!("Proxy"),
+            tr_key!("Port"),
             "",
             Kind::Num(
                 |s| s.proxy.port.into(),
@@ -244,14 +262,14 @@ fn items() -> Vec<Item> {
             ),
         ),
         item(
-            "Proxy",
-            "Domain",
-            "Host name clients use; must be public for Let's Encrypt.",
+            tr_key!("Proxy"),
+            tr_key!("Domain"),
+            tr_key!("Host name clients use; must be public for Let's Encrypt."),
             Kind::Text(|s| &mut s.proxy.domain),
         ),
         item(
-            "Proxy",
-            "TLS",
+            tr_key!("Proxy"),
+            tr_key!("TLS"),
             "",
             Kind::Choice(
                 &TLS_LABELS,
@@ -265,45 +283,45 @@ fn items() -> Vec<Item> {
             ),
         ),
         item(
-            "Proxy",
-            "ACME email",
-            "For Let's Encrypt.",
+            tr_key!("Proxy"),
+            tr_key!("ACME email"),
+            tr_key!("For Let's Encrypt."),
             Kind::Text(|s| &mut s.proxy.acme_email),
         ),
         item(
-            "Proxy",
-            "Certificate file",
-            "For \"my certificate\".",
+            tr_key!("Proxy"),
+            tr_key!("Certificate file"),
+            tr_key!("For \"my certificate\"."),
             Kind::Text(|s| &mut s.proxy.cert_path),
         ),
         item(
-            "Proxy",
-            "Key file",
-            "For \"my certificate\".",
+            tr_key!("Proxy"),
+            tr_key!("Key file"),
+            tr_key!("For \"my certificate\"."),
             Kind::Text(|s| &mut s.proxy.key_path),
         ),
         item(
-            "Proxy",
-            "Require token",
-            "Reject requests without a valid bearer token.",
+            tr_key!("Proxy"),
+            tr_key!("Require token"),
+            tr_key!("Reject requests without a valid bearer token."),
             Kind::Bool(|s| &mut s.proxy.require_token),
         ),
         item(
-            "Proxy",
-            "API tokens",
-            "Enter to manage the tokens clients send as `Authorization: Bearer …`.",
+            tr_key!("Proxy"),
+            tr_key!("API tokens"),
+            tr_key!("Enter to manage the tokens clients send as `Authorization: Bearer …`."),
             Kind::Tokens,
         ),
         item(
-            "Proxy",
-            "CORS origin",
-            "Allowed browser origin, empty = none.",
+            tr_key!("Proxy"),
+            tr_key!("CORS origin"),
+            tr_key!("Allowed browser origin, empty = none."),
             Kind::Text(|s| &mut s.proxy.cors_origin),
         ),
         item(
-            "Logs",
-            "Source",
-            "Where the Logs tab reads the server log from.",
+            tr_key!("Logs"),
+            tr_key!("Source"),
+            tr_key!("Where the Logs tab reads the server log from."),
             Kind::Choice(
                 &SOURCE_LABELS,
                 |s| {
@@ -316,36 +334,56 @@ fn items() -> Vec<Item> {
             ),
         ),
         item(
-            "Logs",
-            "Log file",
+            tr_key!("Logs"),
+            tr_key!("Log file"),
             "",
             Kind::Text(|s| &mut s.logs.file_path),
         ),
         item(
-            "Logs",
-            "Journal unit",
+            tr_key!("Logs"),
+            tr_key!("Journal unit"),
             "",
             Kind::Text(|s| &mut s.logs.journal_unit),
         ),
         item(
-            "Logs",
-            "Max lines",
-            "Kept in memory.",
+            tr_key!("Logs"),
+            tr_key!("Max lines"),
+            tr_key!("Kept in memory."),
             Kind::Num(
                 |s| s.logs.max_lines as u64,
                 |s, v| s.logs.max_lines = v as usize,
             ),
         ),
         item(
-            "Interface",
-            "Poll interval (ms)",
+            tr_key!("Interface"),
+            tr_key!("Language"),
+            tr_key!("Interface language; System follows the OS. Applied when saved (w)."),
+            Kind::Choice(
+                &LANGUAGE_LABELS,
+                |s| {
+                    crate::i18n::LANGUAGES
+                        .iter()
+                        .position(|(code, _)| *code == s.ui.language)
+                        .map_or(0, |i| i + 1)
+                },
+                |s, i| {
+                    s.ui.language = match i {
+                        0 => String::new(),
+                        i => crate::i18n::LANGUAGES[i - 1].0.to_string(),
+                    }
+                },
+            ),
+        ),
+        item(
+            tr_key!("Interface"),
+            tr_key!("Poll interval (ms)"),
             "",
             Kind::Num(|s| s.ui.poll_interval_ms, |s, v| s.ui.poll_interval_ms = v),
         ),
         item(
-            "Interface",
-            "History (s)",
-            "Span of the Performance charts.",
+            tr_key!("Interface"),
+            tr_key!("History (s)"),
+            tr_key!("Span of the Performance charts."),
             Kind::Num(|s| s.ui.history_seconds, |s, v| s.ui.history_seconds = v),
         ),
     ]
@@ -395,9 +433,9 @@ impl Tui {
     pub(super) fn save_hints(&self) -> Vec<(&'static str, &'static str)> {
         if self.draft_dirty() {
             vec![
-                ("w", "save"),
-                ("W", "save & restart"),
-                ("u", "undo changes"),
+                ("w", tr("save")),
+                ("W", tr("save & restart")),
+                ("u", tr("undo changes")),
             ]
         } else {
             Vec::new()
@@ -429,7 +467,7 @@ impl Tui {
 
     pub(super) fn add_token(&mut self, label: String) {
         let label = if label.trim().is_empty() {
-            format!("token {}", self.draft.proxy.tokens.len() + 1)
+            trf!("token {n}", n = self.draft.proxy.tokens.len() + 1)
         } else {
             label.trim().to_string()
         };
@@ -528,17 +566,17 @@ impl Tui {
     pub(super) fn settings_hints(&self) -> Vec<(&'static str, &'static str)> {
         let mut hints = if self.settings.tokens_open {
             vec![
-                ("n", "new token"),
-                ("d", "delete"),
-                ("r", "reveal"),
-                ("Esc", "close"),
+                ("n", tr("new token")),
+                ("d", tr("delete")),
+                ("r", tr("reveal")),
+                ("Esc", tr("close")),
             ]
         } else {
             vec![
-                ("Enter", "edit / toggle"),
-                ("← →", "change choice"),
-                ("r", "reveal secrets"),
-                ("D", "defaults"),
+                ("Enter", tr("edit / toggle")),
+                ("← →", tr("change choice")),
+                ("r", tr("reveal secrets")),
+                ("D", tr("defaults")),
             ]
         };
         hints.extend(self.save_hints());
@@ -550,9 +588,9 @@ impl Tui {
         match kind {
             Kind::Bool(get) => {
                 if *get(s) {
-                    Span::styled("[x] on", Style::new().fg(GREEN))
+                    Span::styled(tr("[x] on"), Style::new().fg(GREEN))
                 } else {
-                    Span::styled("[ ] off", Style::new().dark_gray())
+                    Span::styled(tr("[ ] off"), Style::new().dark_gray())
                 }
             }
             Kind::Text(get) => {
@@ -574,7 +612,7 @@ impl Tui {
                 }
             }
             Kind::Num(get, _) => Span::raw(get(s).to_string()),
-            Kind::Choice(options, get, _) => Span::raw(format!("‹ {} ›", options[get(s)])),
+            Kind::Choice(options, get, _) => Span::raw(format!("‹ {} ›", tr(options[get(s)]))),
             Kind::Lines(get) => {
                 let v = get(s).lines().collect::<Vec<_>>().join("; ");
                 if v.is_empty() {
@@ -583,9 +621,9 @@ impl Tui {
                     Span::raw(v)
                 }
             }
-            Kind::Tokens => Span::raw(format!(
-                "{} token(s) — Enter to manage",
-                s.proxy.tokens.len()
+            Kind::Tokens => Span::raw(trf!(
+                "{count} token(s) — Enter to manage",
+                count = s.proxy.tokens.len()
             )),
         }
     }
@@ -607,7 +645,7 @@ impl Tui {
                     lines.push(Line::raw(""));
                 }
                 lines.push(Line::from(Span::styled(
-                    section,
+                    tr(section),
                     Style::new().fg(kit::ACCENT).bold(),
                 )));
             }
@@ -619,11 +657,11 @@ impl Tui {
             let editing =
                 matches!(&self.editing, Some(Editing { field: Field::Setting(j), .. }) if *j == i);
             let value = if editing {
-                Span::styled("editing below…", Style::new().fg(AMBER))
+                Span::styled(tr("editing below…"), Style::new().fg(AMBER))
             } else {
                 self.value_span(&item.kind)
             };
-            let line = Line::from(vec![Span::raw(format!("  {:<24}", item.label)), value]);
+            let line = Line::from(vec![Span::raw(format!("  {:<24}", tr(item.label))), value]);
             // Greyed out while the server is not managed by this app.
             let line = if item.managed_only() && !self.draft.server.manage_server {
                 Line::from(
@@ -642,9 +680,9 @@ impl Tui {
             });
         }
         let block = kit::panel(if self.draft_dirty() {
-            "Settings · unsaved changes (w save, W save & restart services)"
+            tr("Settings · unsaved changes (w save, W save & restart services)")
         } else {
-            "Settings"
+            tr("Settings")
         });
         let height = block.inner(list_area).height as usize;
         // Keep the selection in view, with a little context below it.
@@ -666,21 +704,21 @@ impl Tui {
         }
 
         let item = &items[self.settings.sel];
-        let mut help = vec![Line::raw(item.help)];
+        let mut help = vec![Line::raw(tr(item.help))];
         if item.managed_only() && !self.draft.server.manage_server {
             help.push(Line::from(Span::styled(
-                "Only used for a server started by this app: enable \"Manage server\" first.",
+                tr("Only used for a server started by this app: enable \"Manage server\" first."),
                 Style::new().fg(AMBER),
             )));
         } else if item.section == "Server" {
             help.push(Line::from(kit::weak(
-                "Server settings take effect when the managed server restarts (W). GPU selection is in the GPU tab.",
+                tr("Server settings take effect when the managed server restarts (W). GPU selection is in the GPU tab."),
             )));
         }
         f.render_widget(
             Paragraph::new(help)
                 .wrap(Wrap { trim: true })
-                .block(kit::panel(item.label)),
+                .block(kit::panel(tr(item.label))),
             help_area,
         );
 
@@ -712,19 +750,22 @@ impl Tui {
             })
             .collect();
         if lines.is_empty() {
-            lines.push(Line::from(kit::weak(
+            lines.push(Line::from(kit::weak(tr(
                 " No token yet: press n to generate one.",
-            )));
+            ))));
         }
         lines.push(Line::raw(""));
-        lines.push(Line::from(kit::weak(
+        lines.push(Line::from(kit::weak(tr(
             " New tokens are saved with w. Give each client its own token.",
-        )));
+        ))));
         let area = kit::popup(f, 100, lines.len() as u16 + 2);
         self.hit(area, Hit::Block);
         let inner = area.inner(ratatui::layout::Margin::new(1, 1));
         self.hit_rows(inner, 0, tokens.len());
-        f.render_widget(Paragraph::new(lines).block(kit::panel("API tokens")), area);
+        f.render_widget(
+            Paragraph::new(lines).block(kit::panel(tr("API tokens"))),
+            area,
+        );
     }
 }
 

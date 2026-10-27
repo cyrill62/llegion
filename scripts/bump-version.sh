@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Sets the project version: asks for a description of the version, writes VERSION, syncs
-# Cargo.toml and Cargo.lock, turns the CHANGELOG.md "Unreleased" section into the new
-# version headed by that description, and commits with it as the message body.
+# Sets the project version, updates the changelog, and commits it with the description.
+# A direct bump on the main branch also creates the annotated version tag. Git-flow
+# release/hotfix branches are tagged by `git flow ... finish` after the merge.
 #
 # Usage: scripts/bump-version.sh [options] [major | minor | patch | X.Y.Z]
 #
@@ -12,6 +12,7 @@
 #     git flow release finish 0.2.0
 #     scripts/release.sh
 #   major / minor / patch bump the version currently in VERSION.
+#   A direct bump on the main branch creates the annotated tag after committing.
 #
 #   Options:
 #     -m, --message TEXT  the version description, instead of asking for it
@@ -28,7 +29,7 @@ cd "$(dirname "$0")/.."
 
 die() { echo "error: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
-usage() { sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 # Replaces $1 with stdin in place, keeping its permissions.
 rewrite() { local tmp; tmp=$(mktemp); cat > "$tmp"; cat "$tmp" > "$1"; rm -f "$tmp"; }
 
@@ -85,7 +86,13 @@ esac
 [ "$NEW" != "$CURRENT" ] || die "version is already $NEW"
 
 TAG_PREFIX=$(git config gitflow.prefix.versiontag || true)
-TAG_PREFIX=${TAG_PREFIX:-v} # empty (git flow init's default) still means "v"
+TAG_PREFIX=${TAG_PREFIX:-v} # empty (git flow init's default) still means "v": release.yml only runs on v* tags
+MAIN_BRANCH=$(git config gitflow.branch.master || echo main)
+TAG="$TAG_PREFIX$NEW"
+if [ "$COMMIT" -eq 1 ] && [ "$branch" = "$MAIN_BRANCH" ] \
+  && git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+  die "tag $TAG already exists"
+fi
 info "bumping $CURRENT -> $NEW"
 
 if [ -z "$DESC" ]; then
@@ -153,7 +160,14 @@ if [ $COMMIT -eq 1 ]; then
   [ -f Cargo.lock ] && git add Cargo.lock
   [ "$SCREENSHOTS" -eq 0 ] || git add docs/screenshots
   git commit -m "[$KIND] $TAG_PREFIX$NEW" -m "$DESC"
-  info "committed; finish the release/hotfix with git flow"
+  if [ "$branch" = "$MAIN_BRANCH" ]; then
+    git tag -a "$TAG" -m "$TAG"
+    info "committed and created tag $TAG"
+  elif [[ "$branch" == "$release_prefix"* || "$branch" == "$hotfix_prefix"* ]]; then
+    info "committed; finish the release/hotfix with git flow to create tag $TAG"
+  else
+    info "committed; no tag created outside $MAIN_BRANCH or a git-flow release/hotfix"
+  fi
 else
   info "files updated (not committed)"
 fi

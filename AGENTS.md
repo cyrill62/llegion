@@ -32,6 +32,9 @@ Run fmt, clippy and tests before considering a change done; CI runs them on Linu
 - `config.rs`: settings (TOML in the platform config dir, owner-only perms on Unix) and settings → environment variables for `ollama serve` (GPU selection, proxy forces loopback, etc.).
 - `process.rs`: supervisor for child processes (`ollama serve`, `ferron`) with log capture and restart.
 - `ferron.rs`: Ferron config (`ferron.kdl`) generation (TLS modes, bearer-token auth, CORS) and the self-signed certificate.
+- `i18n.rs`: interface translations shared by both front-ends. English text is the key: `tr("…")`, `trf!("… {name}", name = …)` for placeholders, `tr_key!` to mark literals in consts (translate them with `tr` where shown); `ic!` labels are translated too. Tables are `locales/<lang>.json` (fr, de, es, it, zh), embedded at build time; the language follows the OS unless set in Settings.
+- `install.rs`: Launcher agents: installed check (PATH, plus the registry PATH on Windows), per-OS install and launch commands, opening a terminal (PowerShell on Windows).
+- `relay.rs`: loopback relay that adds the API token (and accepts self-signed certificates) for agents started from the Launcher, which can't send either.
 - `gpu.rs`: GPU detection/sampling (nvidia-smi, /sys/class/drm + lspci, Windows registry, system_profiler).
 - `logs.rs`: log sources (process pipes, file tailing, journalctl).
 - `icons.rs`: Material icon codepoints as macros (so they can be `concat!`ed into labels); declared with `#[macro_use]` first in `lib.rs`.
@@ -46,6 +49,7 @@ Run fmt, clippy and tests before considering a change done; CI runs them on Linu
 - Keep platform-specific code behind `cfg` and make sure all three OSes still compile.
 - Logic both front-ends need (formatting, filters, summaries) goes in the core modules, not in `views/` or `tui/`.
 - The TUI must not print to stdout/stderr while running: everything goes through `LogBuffer`.
+- User-facing text goes through `tr`/`trf!`/`ic!`, with an entry in every `locales/*.json` (the `i18n` test fails on a missing one). Log lines and error details from Ollama/Ferron stay in English.
 - The settings file contains API tokens: never log or print it.
 
 ## Environment notes

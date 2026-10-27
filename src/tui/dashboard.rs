@@ -9,6 +9,7 @@ use ratatui::widgets::{Cell, Paragraph, Row, Table};
 use super::Tui;
 use super::kit::{self, AMBER, GREEN, RED};
 use crate::ferron;
+use crate::i18n::tr;
 use crate::ollama::RunningModel;
 use crate::util::{ctx_short, format_bytes, format_duration_secs};
 
@@ -18,22 +19,22 @@ impl Tui {
         let settings = &self.ctl.settings;
         if settings.server.manage_server {
             if self.ctl.ollama_proc.is_running() {
-                hints.extend([("S", "stop server"), ("R", "restart server")]);
+                hints.extend([("S", tr("stop server")), ("R", tr("restart server"))]);
             } else {
-                hints.push(("S", "start server"));
+                hints.push(("S", tr("start server")));
             }
         }
         if settings.proxy.enabled {
             hints.push((
                 "P",
                 if self.ctl.ferron_proc.is_running() {
-                    "stop proxy"
+                    tr("stop proxy")
                 } else {
-                    "start proxy"
+                    tr("start proxy")
                 },
             ));
         }
-        hints.push(("F5", "refresh"));
+        hints.push(("F5", tr("refresh")));
         hints
     }
 
@@ -62,81 +63,91 @@ impl Tui {
             kit::kv("API", Span::raw(settings.connection.base_url.clone())),
             if connected {
                 kit::kv(
-                    "Status",
+                    tr("Status"),
                     Span::styled(
-                        format!("online · v{}", version.unwrap_or_default()),
+                        trf!("online · v{version}", version = version.unwrap_or_default()),
                         Style::new().fg(GREEN),
                     ),
                 )
             } else {
-                kit::kv("Status", Span::styled("unreachable", Style::new().fg(RED)))
+                kit::kv(
+                    tr("Status"),
+                    Span::styled(tr("unreachable"), Style::new().fg(RED)),
+                )
             },
             kit::kv(
-                "Models",
-                Span::raw(format!("{n_models} ({} on disk)", format_bytes(disk))),
+                tr("Models"),
+                Span::raw(trf!(
+                    "{count} ({size} on disk)",
+                    count = n_models,
+                    size = format_bytes(disk)
+                )),
             ),
         ];
         if let Some(err) = error.filter(|_| !connected) {
             conn.push(Line::from(kit::weak(err)));
         }
         f.render_widget(
-            Paragraph::new(conn).block(kit::panel("Connection")),
+            Paragraph::new(conn).block(kit::panel(tr("Connection"))),
             conn_area,
         );
 
         let p = &self.ctl.ollama_proc;
         let server = if !settings.server.manage_server {
             vec![
-                kit::kv("Mode", kit::weak("external")),
-                Line::from(kit::weak("Enable \"Manage server\" in Settings")),
-                Line::from(kit::weak("to start/stop Ollama from here.")),
+                kit::kv(tr("Mode"), kit::weak("external")),
+                Line::from(kit::weak(tr("Enable \"Manage server\" in Settings"))),
+                Line::from(kit::weak(tr("to start/stop Ollama from here."))),
             ]
         } else {
             let state = if p.is_running() {
                 Span::styled(
-                    format!("running · pid {}", p.pid().unwrap_or(0)),
+                    trf!("running · pid {pid}", pid = p.pid().unwrap_or(0)),
                     Style::new().fg(GREEN),
                 )
             } else {
-                Span::styled("stopped", Style::new().fg(AMBER))
+                Span::styled(tr("stopped"), Style::new().fg(AMBER))
             };
             let uptime = p
                 .started
                 .map(|t| format_duration_secs(t.elapsed().as_secs() as i64))
                 .unwrap_or_else(|| "-".into());
             let ctx = match settings.server.context_length {
-                0 => "server default".into(),
-                c => format!("{} tokens", ctx_short(c as u64)),
+                0 => tr("server default").into(),
+                c => trf!("{count} tokens", count = ctx_short(c as u64)),
             };
             vec![
-                kit::kv("State", state),
-                kit::kv("Uptime", Span::raw(uptime)),
-                kit::kv("Context", Span::raw(ctx)),
-                Line::from(kit::weak("S start/stop · R restart")),
+                kit::kv(tr("State"), state),
+                kit::kv(tr("Uptime"), Span::raw(uptime)),
+                kit::kv(tr("Context"), Span::raw(ctx)),
+                Line::from(kit::weak(tr("S start/stop · R restart"))),
             ]
         };
         f.render_widget(
-            Paragraph::new(server).block(kit::panel("Managed server")),
+            Paragraph::new(server).block(kit::panel(tr("Managed server"))),
             server_area,
         );
 
         let proxy = if !settings.proxy.enabled {
-            vec![Line::from(kit::weak("Disabled (Settings → Proxy)."))]
+            vec![Line::from(kit::weak(tr("Disabled (Settings → Proxy).")))]
         } else {
             let state = if self.ctl.ferron_proc.is_running() {
-                Span::styled("running", Style::new().fg(GREEN))
+                Span::styled(tr("running"), Style::new().fg(GREEN))
             } else {
-                Span::styled("stopped", Style::new().fg(AMBER))
+                Span::styled(tr("stopped"), Style::new().fg(AMBER))
             };
             vec![
-                kit::kv("State", state),
+                kit::kv(tr("State"), state),
                 kit::kv("URL", Span::raw(ferron::public_url(settings))),
-                kit::kv("Tokens", Span::raw(settings.proxy.tokens.len().to_string())),
-                Line::from(kit::weak("P start/stop")),
+                kit::kv(
+                    tr("Tokens"),
+                    Span::raw(settings.proxy.tokens.len().to_string()),
+                ),
+                Line::from(kit::weak(tr("P start/stop"))),
             ]
         };
         f.render_widget(
-            Paragraph::new(proxy).block(kit::panel("HTTPS proxy")),
+            Paragraph::new(proxy).block(kit::panel(tr("HTTPS proxy"))),
             proxy_area,
         );
 
@@ -163,11 +174,11 @@ impl Tui {
             ]));
         }
         if !gpus_detected {
-            sys.push(Line::from(kit::weak("Detecting GPUs…")));
+            sys.push(Line::from(kit::weak(tr("Detecting GPUs…"))));
         } else if gpus.is_empty() {
-            sys.push(Line::from(kit::weak(
+            sys.push(Line::from(kit::weak(tr(
                 "No GPU detected: Ollama runs on the CPU.",
-            )));
+            ))));
         }
         for g in &gpus {
             let mut spans = vec![kit::label(&format!("GPU {}", g.vendor.label()))];
@@ -191,9 +202,9 @@ impl Tui {
             spans.push(kit::weak(format!("   {}", g.name)));
             sys.push(Line::from(spans));
         }
-        f.render_widget(Paragraph::new(sys).block(kit::panel("System")), system);
+        f.render_widget(Paragraph::new(sys).block(kit::panel(tr("System"))), system);
 
-        running_table(f, models, &running, None, "Running models");
+        running_table(f, models, &running, None, tr("Running models"));
     }
 }
 
@@ -207,7 +218,7 @@ pub(super) fn running_table(
 ) {
     if running.is_empty() {
         f.render_widget(
-            Paragraph::new(kit::weak("No model is currently loaded in memory."))
+            Paragraph::new(kit::weak(tr("No model is currently loaded in memory.")))
                 .block(kit::panel(title)),
             area,
         );
@@ -243,12 +254,12 @@ pub(super) fn running_table(
         }
     });
     let header = Row::new([
-        "Model",
-        "Size",
+        tr("Model"),
+        tr("Size"),
         "VRAM",
-        "Processor",
-        "Context",
-        "Unloads in",
+        tr("Processor"),
+        tr("Context"),
+        tr("Unloads in"),
     ])
     .style(Style::new().dark_gray());
     let widths = [

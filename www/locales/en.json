@@ -1,0 +1,79 @@
+{
+  "language": "Language",
+  "heroBefore": "A fast, native control panel for ",
+  "heroAfter": ". Run, monitor, benchmark and secure your local models from a desktop app or a terminal UI, on Linux, Windows and macOS.",
+  "download": "Download",
+  "github": "View on GitHub",
+  "screenshots": "Screenshots",
+  "tabs": {
+    "dashboard": "Dashboard",
+    "models": "Models",
+    "chat": "Chat",
+    "performance": "Performance",
+    "gpu": "GPU",
+    "logs": "Logs",
+    "settings": "Settings"
+  },
+  "shotAlt": "Llegion {{tab}} tab",
+  "featuresTitle": "Everything Ollama, in one place",
+  "features": [
+    [
+      "Dashboard",
+      "Server status and version, running models, GPU VRAM bars, CPU and RAM at a glance."
+    ],
+    [
+      "Models",
+      "Pull with progress, load with a chosen context, unload, inspect and delete models."
+    ],
+    [
+      "Chat",
+      "Streamed Markdown answers, tok/s and time to first token, side-by-side regenerations to compare models."
+    ],
+    [
+      "Performance",
+      "Live CPU, RAM, GPU and VRAM charts, plus a tokens/s benchmark using Ollama’s own counters."
+    ],
+    [
+      "GPU",
+      "Detects NVIDIA, AMD, Intel and Apple GPUs. Auto, custom device subset or CPU only, Vulkan toggle."
+    ],
+    [
+      "Logs",
+      "Live stream from the managed server, server.log or journalctl, with filters, search and save."
+    ],
+    [
+      "HTTPS + tokens",
+      "A supervised Ferron proxy terminates TLS and rejects requests without a valid bearer token. On from the first launch."
+    ],
+    [
+      "Load balancing",
+      "Spread requests over several Ollama machines, round robin, behind the same tokens and one address."
+    ],
+    [
+      "Launcher",
+      "Install and launch coding agents with ollama launch: Claude Code, Codex, OpenCode, Pi and more."
+    ],
+    [
+      "Managed server",
+      "Runs ollama serve with your settings, captures its logs and restarts it if it crashes."
+    ]
+  ],
+  "terminalTitle": "Works over SSH too",
+  "terminalText": " brings the same seven tabs to the terminal, on top of the same core: settings, managed server, HTTPS proxy, logs and benchmarks. Keyboard first, mouse friendly, no GUI libraries required.",
+  "terminalKeys": [
+    "switch tabs",
+    "start-stop / restart server",
+    "toggle the HTTPS proxy",
+    "all keys"
+  ],
+  "proxyTitle": "Share Ollama safely, at home or at work",
+  "proxyText": "Ollama has no authentication: anyone who reaches its port can use, pull and delete your models. Llegion binds Ollama to loopback and supervises a Ferron proxy in front of it: TLS (self-signed, Let’s Encrypt or your own cert), bearer tokens you can label, copy and revoke, optional CORS, and streamed tokens that arrive immediately. With Ferron installed, it is on from the first launch.",
+  "balancingText": "Got more than one GPU box? Add them in Settings and the proxy balances requests between them, round robin, behind the same tokens: one address for the whole family or a small team.",
+  "getTitle": "Get Llegion",
+  "getText": "Prebuilt archives for Linux (x64, arm64, glibc and musl), macOS (universal .app) and Windows (x64, arm64).",
+  "latest": "Latest release",
+  "fromSource": "Or build from source:",
+  "license": "MIT licensed",
+  "source": "Source on GitHub",
+  "disclaimer": "Llegion is an independent community project, not affiliated with or endorsed by Ollama."
+}

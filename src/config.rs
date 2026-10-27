@@ -144,6 +144,23 @@ pub struct ProxySettings {
     pub require_token: bool,
     pub tokens: Vec<ApiToken>,
     pub cors_origin: String,
+    /// Remote Ollama servers balanced round-robin with the local one.
+    pub backends: Vec<Backend>,
+    /// Off: the generated config proxies to the local Ollama only, whatever `backends` holds.
+    pub load_balancing: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Backend {
+    pub url: String,
+    pub enabled: bool,
+}
+
+impl Backend {
+    pub fn is_valid(&self) -> bool {
+        let u = self.url.trim();
+        (u.starts_with("http://") || u.starts_with("https://")) && !u.contains(char::is_whitespace)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -168,6 +185,8 @@ impl Default for ProxySettings {
             require_token: true,
             tokens: Vec::new(),
             cors_origin: String::new(),
+            backends: Vec::new(),
+            load_balancing: true,
         }
     }
 }
@@ -211,6 +230,8 @@ impl Default for LogSettings {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default)]
 pub struct UiSettings {
+    /// Interface language code (see `i18n::LANGUAGES`); empty follows the system.
+    pub language: String,
     pub dark_mode: bool,
     pub chat_warning_acknowledged: bool,
     /// Chat subjects, kept even while no chat is in them.
@@ -224,6 +245,7 @@ pub struct UiSettings {
 impl Default for UiSettings {
     fn default() -> Self {
         Self {
+            language: String::new(),
             dark_mode: true,
             chat_warning_acknowledged: false,
             chat_subjects: Vec::new(),
@@ -284,9 +306,31 @@ impl Settings {
             .or_else(|_| {
                 std::fs::read_to_string(project_config_dir("llegion").join("settings.toml"))
             })
-            .ok()
-            .and_then(|s| toml::from_str(&s).ok())
-            .unwrap_or_default()
+            .map(|s| toml::from_str(&s).unwrap_or_default())
+            .unwrap_or_else(|_| {
+                let settings = Self::first_launch(crate::install::is_installed("ferron"));
+                // Keeps the generated token; on failure the next launch just makes another.
+                let _ = settings.save();
+                settings
+            })
+    }
+
+    /// Fresh install: when Ferron is there, Ollama sits behind the token-checking proxy from
+    /// the start, in plain HTTP on loopback so it works without a certificate.
+    fn first_launch(ferron: bool) -> Self {
+        let mut s = Self::default();
+        if !ferron {
+            return s;
+        }
+        s.proxy.enabled = true;
+        s.proxy.auto_start = true;
+        s.proxy.tls = TlsMode::Off;
+        s.proxy.listen_host = "127.0.0.1".into();
+        s.proxy.tokens.push(ApiToken {
+            label: "default".into(),
+            token: crate::util::generate_token(),
+        });
+        s
     }
 
     pub fn save(&self) -> anyhow::Result<PathBuf> {
@@ -485,6 +529,16 @@ mod tests {
 
     fn env_map(env: &[(String, String)]) -> std::collections::HashMap<String, String> {
         env.iter().cloned().collect()
+    }
+
+    #[test]
+    fn first_launch_enables_the_http_proxy() {
+        assert_eq!(Settings::first_launch(false), Settings::default());
+        let s = Settings::first_launch(true);
+        assert!(s.proxy.enabled && s.proxy.require_token && s.proxy.tokens.len() == 1);
+        assert_eq!(s.proxy.tls, TlsMode::Off);
+        assert_eq!(s.effective_bind_host(), "127.0.0.1");
+        assert_eq!(crate::ferron::public_url(&s), "http://localhost:8443");
     }
 
     #[test]

@@ -5,6 +5,20 @@ entries under **Unreleased** into the new version section when a version is bump
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-27
+
+Add translations (APP & Website)
+Add load balancing in the PROXY
+Fix ollama launcher to work with proxied servers.
+
+Translations: the desktop app, the terminal UI and the website are available in French, German, Spanish, Italian and Chinese (system language by default, or chosen in Settings).
+
+Load balancing: the Ferron proxy can round-robin between the local Ollama and remote servers, managed and tested from Settings → Connection, with a switch in Security to turn it off without removing the servers.
+Settings: *API tokens* get their own menu entry under *Security*; more space between the menu and the panes.
+Launcher: an install menu on each agent missing from the machine, listing the ways it can be installed here (winget, Homebrew, pacman, yay/paru, emerge, the official installer or npm; recommended first), run in a terminal window, and a Launch button that runs `ollama launch` in a terminal in the chosen project folder with `OLLAMA_HOST` set to the API URL. When that server needs a token or a self-signed certificate, the agents go through a loopback relay that adds them. "Copy command" copies exactly what Launch runs.
+The Chat tab reopens the latest chat at startup instead of adding an empty one.
+First launch enables the proxy in plain HTTP on 127.0.0.1:8443 with a generated API token, when `ferron` is installed.
+
 ## [0.3.1] - 2026-10-26
 
 Update screenshots.

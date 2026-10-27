@@ -1,0 +1,79 @@
+{
+  "language": "Lingua",
+  "heroBefore": "Un pannello di controllo nativo e veloce per ",
+  "heroAfter": ". Esegui, monitora, misura e proteggi i tuoi modelli locali da un’app desktop o da un’interfaccia nel terminale, su Linux, Windows e macOS.",
+  "download": "Scarica",
+  "github": "Vedi su GitHub",
+  "screenshots": "Schermate",
+  "tabs": {
+    "dashboard": "Pannello",
+    "models": "Modelli",
+    "chat": "Chat",
+    "performance": "Prestazioni",
+    "gpu": "GPU",
+    "logs": "Log",
+    "settings": "Impostazioni"
+  },
+  "shotAlt": "Scheda {{tab}} di Llegion",
+  "featuresTitle": "Tutto Ollama, in un unico posto",
+  "features": [
+    [
+      "Pannello",
+      "Stato e versione del server, modelli in esecuzione, VRAM per GPU, CPU e RAM a colpo d’occhio."
+    ],
+    [
+      "Modelli",
+      "Download con avanzamento, caricamento con il contesto scelto, rimozione dalla memoria, dettagli ed eliminazione."
+    ],
+    [
+      "Chat",
+      "Risposte Markdown in streaming, tok/s e tempo al primo token, rigenerazioni affiancate per confrontare i modelli."
+    ],
+    [
+      "Prestazioni",
+      "Grafici in tempo reale di CPU, RAM, GPU e VRAM, più un benchmark tokens/s con i contatori di Ollama."
+    ],
+    [
+      "GPU",
+      "Rileva GPU NVIDIA, AMD, Intel e Apple. Auto, selezione dei dispositivi o solo CPU, opzione Vulkan."
+    ],
+    [
+      "Log",
+      "Flusso in tempo reale dal server gestito, da server.log o da journalctl, con filtri, ricerca e salvataggio."
+    ],
+    [
+      "HTTPS + token",
+      "Un proxy Ferron supervisionato termina il TLS e rifiuta le richieste senza un token Bearer valido. Attivo dal primo avvio."
+    ],
+    [
+      "Bilanciamento del carico",
+      "Distribuisce le richieste su più macchine Ollama, a turno, dietro gli stessi token e un solo indirizzo."
+    ],
+    [
+      "Launcher",
+      "Installa e avvia agenti di programmazione con ollama launch: Claude Code, Codex, OpenCode, Pi e altri."
+    ],
+    [
+      "Server gestito",
+      "Avvia ollama serve con le tue impostazioni, ne cattura i log e lo riavvia in caso di crash."
+    ]
+  ],
+  "terminalTitle": "Funziona anche via SSH",
+  "terminalText": " porta le stesse sette schede nel terminale, sullo stesso nucleo: impostazioni, server gestito, proxy HTTPS, log e benchmark. Pensato per la tastiera, compatibile con il mouse, senza librerie grafiche.",
+  "terminalKeys": [
+    "cambia scheda",
+    "avvia-ferma / riavvia il server",
+    "attiva il proxy HTTPS",
+    "tutti i tasti"
+  ],
+  "proxyTitle": "Condividi Ollama in sicurezza, a casa o in ufficio",
+  "proxyText": "Ollama non ha autenticazione: chiunque raggiunga la sua porta può usare, scaricare ed eliminare i tuoi modelli. Llegion lega Ollama all’interfaccia locale e supervisiona davanti a lui un proxy Ferron: TLS (autofirmato, Let’s Encrypt o un tuo certificato), token Bearer da etichettare, copiare e revocare, CORS facoltativo e token in streaming che arrivano subito. Con Ferron installato, è attivo dal primo avvio.",
+  "balancingText": "Hai più di una macchina con GPU? Aggiungile nelle Impostazioni e il proxy distribuisce le richieste tra loro, a turno, dietro gli stessi token: un solo indirizzo per tutta la famiglia o un piccolo team.",
+  "getTitle": "Scarica Llegion",
+  "getText": "Archivi pronti per Linux (x64, arm64, glibc e musl), macOS (.app universale) e Windows (x64, arm64).",
+  "latest": "Ultima versione",
+  "fromSource": "Oppure compila dai sorgenti:",
+  "license": "Licenza MIT",
+  "source": "Sorgenti su GitHub",
+  "disclaimer": "Llegion è un progetto indipendente della comunità, non affiliato né approvato da Ollama."
+}

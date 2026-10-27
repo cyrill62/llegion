@@ -10,6 +10,7 @@ use ratatui::widgets::Paragraph;
 use super::kit::{self, AMBER, RED};
 use super::{Field, Tui};
 use crate::config::LogSource;
+use crate::i18n::tr;
 use crate::logs::{Level, LogLine, Origin, line_filter};
 
 const LEVELS: [Level; 4] = [Level::Debug, Level::Info, Level::Warn, Level::Error];
@@ -42,9 +43,9 @@ impl Default for State {
 
 fn source_label(s: LogSource) -> &'static str {
     match s {
-        LogSource::Managed => "managed server only",
-        LogSource::File => "log file",
-        LogSource::Journal => "systemd journal",
+        LogSource::Managed => tr("managed server only"),
+        LogSource::File => tr("log file"),
+        LogSource::Journal => tr("systemd journal"),
     }
 }
 
@@ -112,13 +113,13 @@ impl Tui {
 
     pub(super) fn logs_hints(&self) -> Vec<(&'static str, &'static str)> {
         vec![
-            ("/", "filter"),
-            ("v", "level"),
-            ("o f a", "ollama/ferron/app"),
-            ("s", "source"),
+            ("/", tr("filter")),
+            ("v", tr("level")),
+            ("o f a", tr("ollama/ferron/app")),
+            ("s", tr("source")),
             ("p", if self.logs.paused { "resume" } else { "pause" }),
-            ("x", "clear"),
-            ("End", "follow"),
+            ("x", tr("clear")),
+            ("End", tr("follow")),
         ]
     }
 
@@ -143,7 +144,7 @@ impl Tui {
         let mut spans = vec![
             kit::weak(" source "),
             Span::raw(format!("{source}  ")),
-            kit::weak("level ≥ "),
+            kit::weak(tr("level ≥ ")),
             Span::raw(format!("{}  ", v.min_level.label())),
             toggle("ollama", v.origins[0]),
             toggle("ferron", v.origins[1]),
@@ -158,7 +159,7 @@ impl Tui {
         }
         f.render_widget(Line::from(spans), bar);
 
-        let title = format!("{} lines", v.cache.len());
+        let title = trf!("{count} lines", count = v.cache.len());
         let block = kit::panel(&title);
         let inner = block.inner(list);
         let height = inner.height as usize;

@@ -64,6 +64,8 @@ impl Capture {
         s.ui.poll_interval_ms = 500;
         // Managed (but not started) so the GPU tab and the server options are enabled.
         s.server.manage_server = true;
+        // The README pictures are in English whatever the machine's language.
+        s.ui.language = "en".into();
         s
     }
 

@@ -152,6 +152,26 @@ pub struct PullEvent {
     pub error: Option<String>,
 }
 
+/// HTTP agent for `conn`: statuses are returned, not errors, and the self-signed
+/// certificate option applies.
+#[cfg_attr(not(feature = "rustls"), allow(unused_variables))]
+pub fn agent(conn: &Connection, timeout: Option<Duration>) -> ureq::Agent {
+    #[allow(unused_mut)]
+    let mut cfg = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(3)))
+        .timeout_global(timeout)
+        .http_status_as_error(false);
+    #[cfg(feature = "rustls")]
+    if conn.accept_invalid_certs {
+        cfg = cfg.tls_config(
+            ureq::tls::TlsConfig::builder()
+                .disable_verification(true)
+                .build(),
+        );
+    }
+    cfg.build().into()
+}
+
 #[derive(Clone)]
 pub struct Client {
     base: String,
@@ -162,27 +182,11 @@ pub struct Client {
 
 impl Client {
     pub fn new(conn: &Connection) -> Self {
-        let build = |timeout: Option<Duration>| -> ureq::Agent {
-            #[allow(unused_mut)]
-            let mut cfg = ureq::Agent::config_builder()
-                .timeout_connect(Some(Duration::from_secs(3)))
-                .timeout_global(timeout)
-                .http_status_as_error(false);
-            #[cfg(feature = "rustls")]
-            if conn.accept_invalid_certs {
-                cfg = cfg.tls_config(
-                    ureq::tls::TlsConfig::builder()
-                        .disable_verification(true)
-                        .build(),
-                );
-            }
-            cfg.build().into()
-        };
         Self {
             base: conn.base_url.trim_end_matches('/').to_string(),
             token: conn.api_token.trim().to_string(),
-            agent: build(Some(Duration::from_secs(5))),
-            long_agent: build(None),
+            agent: agent(conn, Some(Duration::from_secs(5))),
+            long_agent: agent(conn, None),
         }
     }
 

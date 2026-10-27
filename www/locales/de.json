@@ -1,0 +1,79 @@
+{
+  "language": "Sprache",
+  "heroBefore": "Ein schnelles, natives Control Panel für ",
+  "heroAfter": ". Lokale Modelle ausführen, überwachen, benchmarken und absichern, als Desktop-App oder Terminal-Oberfläche, unter Linux, Windows und macOS.",
+  "download": "Herunterladen",
+  "github": "Auf GitHub ansehen",
+  "screenshots": "Screenshots",
+  "tabs": {
+    "dashboard": "Übersicht",
+    "models": "Modelle",
+    "chat": "Chat",
+    "performance": "Leistung",
+    "gpu": "GPU",
+    "logs": "Protokolle",
+    "settings": "Einstellungen"
+  },
+  "shotAlt": "Llegion-Tab {{tab}}",
+  "featuresTitle": "Alles rund um Ollama, an einem Ort",
+  "features": [
+    [
+      "Übersicht",
+      "Serverstatus und Version, laufende Modelle, VRAM-Balken pro GPU, CPU und RAM auf einen Blick."
+    ],
+    [
+      "Modelle",
+      "Download mit Fortschritt, Laden mit gewähltem Kontext, Entladen, Details und Löschen."
+    ],
+    [
+      "Chat",
+      "Gestreamte Markdown-Antworten, tok/s und Zeit bis zum ersten Token, Neuerzeugungen nebeneinander zum Modellvergleich."
+    ],
+    [
+      "Leistung",
+      "Live-Diagramme für CPU, RAM, GPU und VRAM, dazu ein tokens/s-Benchmark mit Ollamas eigenen Zählern."
+    ],
+    [
+      "GPU",
+      "Erkennt GPUs von NVIDIA, AMD, Intel und Apple. Auto, eigene Geräteauswahl oder nur CPU, Vulkan-Schalter."
+    ],
+    [
+      "Protokolle",
+      "Live-Ausgabe des verwalteten Servers, von server.log oder journalctl, mit Filtern, Suche und Speichern."
+    ],
+    [
+      "HTTPS + Tokens",
+      "Ein überwachter Ferron-Proxy terminiert TLS und lehnt Anfragen ohne gültiges Bearer-Token ab. Ab dem ersten Start aktiv."
+    ],
+    [
+      "Lastverteilung",
+      "Verteilt Anfragen reihum auf mehrere Ollama-Rechner, hinter denselben Tokens und einer Adresse."
+    ],
+    [
+      "Starter",
+      "Coding-Agenten mit ollama launch installieren und starten: Claude Code, Codex, OpenCode, Pi und mehr."
+    ],
+    [
+      "Verwalteter Server",
+      "Startet ollama serve mit deinen Einstellungen, erfasst seine Protokolle und startet ihn nach Abstürzen neu."
+    ]
+  ],
+  "terminalTitle": "Funktioniert auch über SSH",
+  "terminalText": " bringt dieselben sieben Tabs ins Terminal, auf demselben Kern: Einstellungen, verwalteter Server, HTTPS-Proxy, Protokolle und Benchmarks. Tastatur zuerst, mausfreundlich, ohne GUI-Bibliotheken.",
+  "terminalKeys": [
+    "Tab wechseln",
+    "Server starten-stoppen / neu starten",
+    "HTTPS-Proxy umschalten",
+    "alle Tasten"
+  ],
+  "proxyTitle": "Ollama sicher teilen, zu Hause oder im Büro",
+  "proxyText": "Ollama hat keine Authentifizierung: Wer seinen Port erreicht, kann deine Modelle nutzen, herunterladen und löschen. Llegion bindet Ollama an die Loopback-Adresse und überwacht einen Ferron-Proxy davor: TLS (selbstsigniert, Let’s Encrypt oder eigenes Zertifikat), Bearer-Tokens zum Benennen, Kopieren und Widerrufen, optionales CORS und sofort ankommende gestreamte Tokens. Ist Ferron installiert, ist er ab dem ersten Start aktiv.",
+  "balancingText": "Mehr als ein GPU-Rechner? Füge sie in den Einstellungen hinzu, und der Proxy verteilt die Anfragen reihum hinter denselben Tokens: eine Adresse für die ganze Familie oder ein kleines Team.",
+  "getTitle": "Llegion holen",
+  "getText": "Fertige Archive für Linux (x64, arm64, glibc und musl), macOS (Universal-.app) und Windows (x64, arm64).",
+  "latest": "Neueste Version",
+  "fromSource": "Oder aus dem Quellcode bauen:",
+  "license": "MIT-Lizenz",
+  "source": "Quellcode auf GitHub",
+  "disclaimer": "Llegion ist ein unabhängiges Community-Projekt, weder mit Ollama verbunden noch von Ollama unterstützt."
+}

@@ -29,6 +29,7 @@ pub struct Control {
 impl Control {
     /// Creates the core without starting anything; call [`Control::start`] next.
     pub fn new(settings: Settings, repaint: Repaint) -> Self {
+        crate::i18n::set_language(&settings.ui.language);
         let logs = LogBuffer::new(settings.logs.max_lines);
         logs.set_repaint(repaint.clone());
         logs.app(format!(
@@ -80,6 +81,7 @@ impl Control {
     /// Puts `settings` in effect: persists them and reconfigures running components.
     pub fn apply(&mut self, settings: Settings, restart_services: bool) {
         let old = std::mem::replace(&mut self.settings, settings);
+        crate::i18n::set_language(&self.settings.ui.language);
         match self.settings.save() {
             Ok(path) => self
                 .logs

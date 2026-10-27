@@ -8,9 +8,11 @@
     "preview": "vike preview"
   },
   "dependencies": {
+    "i18next": "^26.5.11",
     "motion": "^14.6.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
+    "react-i18next": "^17.1.9",
     "vike": "^0.4.268",
     "vike-react": "^0.6.31"
   },

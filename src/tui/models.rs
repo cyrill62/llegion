@@ -11,6 +11,7 @@ use ratatui::widgets::{Cell, Gauge, Paragraph, Row, Table, TableState, Wrap};
 
 use super::kit::{self, GREEN, RED};
 use super::{Confirm, Field, Hit, Tab, Tui};
+use crate::i18n::tr;
 use crate::ollama::LocalModel;
 use crate::util::{CONTEXT_PRESETS, ctx_label, format_bytes};
 
@@ -119,19 +120,19 @@ impl Tui {
 
     pub(super) fn models_hints(&self) -> Vec<(&'static str, &'static str)> {
         if self.models.info.is_some() {
-            return vec![("↑↓", "scroll"), ("Esc", "close")];
+            return vec![("↑↓", tr("scroll")), ("Esc", tr("close"))];
         }
         vec![
-            ("Enter", "details"),
-            ("l", "load"),
-            ("u", "unload"),
-            ("c", "load context"),
-            ("p", "pull"),
-            ("x", "cancel/clear pulls"),
-            ("d", "delete"),
-            ("t", "chat"),
-            ("b", "benchmark"),
-            ("/", "filter"),
+            ("Enter", tr("details")),
+            ("l", tr("load")),
+            ("u", tr("unload")),
+            ("c", tr("load context")),
+            ("p", tr("pull")),
+            ("x", tr("cancel/clear pulls")),
+            ("d", tr("delete")),
+            ("t", tr("chat")),
+            ("b", tr("benchmark")),
+            ("/", tr("filter")),
         ]
     }
 
@@ -155,10 +156,10 @@ impl Tui {
             Constraint::Min(5),
         ])
         .areas(area);
-        super::dashboard::running_table(f, run_area, &running, None, "Running models");
+        super::dashboard::running_table(f, run_area, &running, None, tr("Running models"));
 
         if !pulls.is_empty() {
-            let block = kit::panel("Pulls");
+            let block = kit::panel(tr("Pulls"));
             let inner = block.inner(pull_area);
             f.render_widget(block, pull_area);
             for (i, (name, p)) in pulls.iter().enumerate() {
@@ -169,7 +170,7 @@ impl Tui {
                 if let Some(err) = &p.error {
                     f.render_widget(Span::styled(err.clone(), Style::new().fg(RED)), bar_area);
                 } else if p.done {
-                    f.render_widget(Span::styled("done", Style::new().fg(GREEN)), bar_area);
+                    f.render_widget(Span::styled(tr("done"), Style::new().fg(GREEN)), bar_area);
                 } else {
                     let ratio = if p.total > 0 {
                         p.completed as f64 / p.total as f64
@@ -199,9 +200,9 @@ impl Tui {
 
         let rows = models.iter().map(|m| {
             let state = if busy.contains(&m.name) {
-                Span::styled("busy…", Style::new().fg(kit::AMBER))
+                Span::styled(tr("busy…"), Style::new().fg(kit::AMBER))
             } else if running.iter().any(|r| r.name == m.name) {
-                Span::styled("loaded", Style::new().fg(GREEN))
+                Span::styled(tr("loaded"), Style::new().fg(GREEN))
             } else {
                 Span::raw("")
             };
@@ -220,8 +221,16 @@ impl Tui {
                 Cell::from(state),
             ])
         });
-        let header = Row::new(["Name", "Params", "Quant", "Family", "Size", "Modified", ""])
-            .style(Style::new().dark_gray());
+        let header = Row::new([
+            tr("Name"),
+            tr("Params"),
+            tr("Quant"),
+            tr("Family"),
+            tr("Size"),
+            tr("Modified"),
+            "",
+        ])
+        .style(Style::new().dark_gray());
         let widths = [
             Constraint::Fill(3),
             Constraint::Length(8),
@@ -231,12 +240,15 @@ impl Tui {
             Constraint::Length(11),
             Constraint::Length(7),
         ];
-        let mut title = format!(
-            "Downloaded models · load context: {}",
-            ctx_label(self.models.load_ctx)
+        let mut title = trf!(
+            "Downloaded models · load context: {context}",
+            context = ctx_label(self.models.load_ctx)
         );
         if !self.models.filter.is_empty() {
-            title.push_str(&format!(" · filter \"{}\"", self.models.filter));
+            title.push_str(&format!(
+                " · {}",
+                trf!("filter \"{filter}\"", filter = self.models.filter)
+            ));
         }
         let mut state = TableState::default().with_selected(Some(self.models.sel));
         f.render_stateful_widget(
@@ -266,26 +278,29 @@ impl Tui {
             .get(name)
             .cloned();
         let lines: Vec<Line> = match detail {
-            None => vec![Line::from(kit::weak("Loading…"))],
+            None => vec![Line::from(kit::weak(tr("Loading…")))],
             Some(Err(e)) => vec![Line::from(Span::styled(e, Style::new().fg(RED)))],
             Some(Ok(d)) => {
                 let mut lines = vec![
-                    kit::kv("Family", Span::raw(d.details.family.clone())),
-                    kit::kv("Parameters", Span::raw(d.details.parameter_size.clone())),
+                    kit::kv(tr("Family"), Span::raw(d.details.family.clone())),
                     kit::kv(
-                        "Quantization",
+                        tr("Parameters"),
+                        Span::raw(d.details.parameter_size.clone()),
+                    ),
+                    kit::kv(
+                        tr("Quantization"),
                         Span::raw(d.details.quantization_level.clone()),
                     ),
-                    kit::kv("Format", Span::raw(d.details.format.clone())),
+                    kit::kv(tr("Format"), Span::raw(d.details.format.clone())),
                     kit::kv(
-                        "Native context",
+                        tr("Native context"),
                         Span::raw(
                             d.native_context_length()
                                 .map(|c| c.to_string())
                                 .unwrap_or_else(|| "-".into()),
                         ),
                     ),
-                    kit::kv("Capabilities", Span::raw(d.capabilities.join(", "))),
+                    kit::kv(tr("Capabilities"), Span::raw(d.capabilities.join(", "))),
                 ];
                 let model_info = d
                     .model_info
@@ -296,10 +311,10 @@ impl Tui {
                     .collect::<Vec<_>>()
                     .join("\n");
                 for (title, content) in [
-                    ("Parameters", d.parameters.as_str()),
-                    ("Template", d.template.as_str()),
-                    ("Model info", model_info.as_str()),
-                    ("License", d.license.as_str()),
+                    (tr("Parameters"), d.parameters.as_str()),
+                    (tr("Template"), d.template.as_str()),
+                    (tr("Model info"), model_info.as_str()),
+                    (tr("License"), d.license.as_str()),
                 ] {
                     if content.trim().is_empty() {
                         continue;

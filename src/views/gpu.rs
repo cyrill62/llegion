@@ -3,6 +3,7 @@ use eframe::egui::{self, RichText};
 use crate::app::{AMBER, App};
 use crate::config::GpuMode;
 use crate::gpu::GpuKind;
+use crate::i18n::tr;
 use crate::views::kit;
 
 impl App {
@@ -25,8 +26,8 @@ impl App {
         if !detected {
             ui.spinner();
         } else if gpus.is_empty() {
-            kit::panel(ui, "No GPU detected", None, |ui| {
-                ui.label(RichText::new("Ollama will run on the CPU.").weak());
+            kit::panel(ui, tr("No GPU detected"), None, |ui| {
+                ui.label(RichText::new(tr("Ollama will run on the CPU.")).weak());
             });
         }
         for (i, g) in gpus.iter().enumerate() {
@@ -53,30 +54,37 @@ impl App {
         kit::panel(
             ui,
             ic!(SETTINGS, "Configuration"),
-            Some("Changes take effect when the Ollama server restarts."),
+            Some(tr("Changes take effect when the Ollama server restarts.")),
             |ui| {
-                kit::setting(ui, "Mode", Some("Which devices Ollama may use"), |ui| {
-                    kit::choice(
-                        ui,
-                        &mut self.draft.gpu.mode,
-                        &[
-                            (GpuMode::Auto, "Auto"),
-                            (GpuMode::Custom, "Custom"),
-                            (GpuMode::CpuOnly, "CPU only"),
-                        ],
-                    );
-                });
+                kit::setting(
+                    ui,
+                    tr("Mode"),
+                    Some(tr("Which devices Ollama may use")),
+                    |ui| {
+                        kit::choice(
+                            ui,
+                            &mut self.draft.gpu.mode,
+                            &[
+                                (GpuMode::Auto, tr("Auto")),
+                                (GpuMode::Custom, tr("Custom")),
+                                (GpuMode::CpuOnly, tr("CPU only")),
+                            ],
+                        );
+                    },
+                );
                 ui.add_enabled_ui(self.draft.gpu.mode != GpuMode::CpuOnly, |ui| {
                     kit::setting(
                         ui,
-                        "Disable integrated GPUs",
-                        Some("iGPUs share system RAM and are often slower than the CPU"),
+                        tr("Disable integrated GPUs"),
+                        Some(tr(
+                            "iGPUs share system RAM and are often slower than the CPU",
+                        )),
                         |ui| kit::switch(ui, &mut self.draft.gpu.disable_igpu, ""),
                     );
                     kit::setting(
                         ui,
-                        "Vulkan backend",
-                        Some("OLLAMA_VULKAN=1, for Intel and some AMD (experimental)"),
+                        tr("Vulkan backend"),
+                        Some(tr("OLLAMA_VULKAN=1, for Intel and some AMD (experimental)")),
                         |ui| kit::switch(ui, &mut self.draft.gpu.enable_vulkan, ""),
                     );
                 });
@@ -87,20 +95,20 @@ impl App {
 
         kit::panel(
             ui,
-            "Resulting environment",
-            Some(
+            tr("Resulting environment"),
+            Some(tr(
                 "Variables passed to `ollama serve`. For a system service, copy them from Settings → Server.",
-            ),
+            )),
             |ui| {
                 let env = self.draft.gpu_env(&gpus);
                 if env.is_empty() {
-                    ui.label(RichText::new("None — Ollama defaults.").weak());
+                    ui.label(RichText::new(tr("None — Ollama defaults.")).weak());
                 } else {
                     let text: Vec<String> = env.iter().map(|(k, v)| format!("{k}={v}")).collect();
                     kit::code_block(ui, &text.join("\n"));
                 }
                 if self.draft.gpu.mode == GpuMode::CpuOnly {
-                    ui.label(RichText::new("All GPUs are hidden from Ollama.").color(AMBER));
+                    ui.label(RichText::new(tr("All GPUs are hidden from Ollama.")).color(AMBER));
                 }
             },
         );

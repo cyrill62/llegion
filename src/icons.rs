@@ -1,6 +1,7 @@
 //! Material icon codepoints (font registered by `egui_material_icons::initialize`).
 //!
-//! Macros rather than consts so they can be `concat!`ed into `&'static str` labels.
+//! Macros rather than consts so they can be `concat!`ed into `&'static str` labels; `ic!`
+//! joins one to a translated label.
 
 macro_rules! icon {
     (HOME) => {
@@ -156,8 +157,9 @@ macro_rules! icon {
 }
 
 /// `ic!(SAVE, "Save")` → icon followed by a label.
+/// Icon + translated label.
 macro_rules! ic {
     ($icon:ident, $text:literal) => {
-        concat!(icon!($icon), "  ", $text)
+        $crate::i18n::with_icon(icon!($icon), $text)
     };
 }

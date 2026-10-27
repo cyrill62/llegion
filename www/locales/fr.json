@@ -1,0 +1,79 @@
+{
+  "language": "Langue",
+  "heroBefore": "Un panneau de contrôle natif et rapide pour ",
+  "heroAfter": ". Lancez, surveillez, mesurez et sécurisez vos modèles locaux depuis une app de bureau ou une interface en terminal, sous Linux, Windows et macOS.",
+  "download": "Télécharger",
+  "github": "Voir sur GitHub",
+  "screenshots": "Captures d’écran",
+  "tabs": {
+    "dashboard": "Tableau de bord",
+    "models": "Modèles",
+    "chat": "Discussion",
+    "performance": "Performances",
+    "gpu": "GPU",
+    "logs": "Journaux",
+    "settings": "Paramètres"
+  },
+  "shotAlt": "Onglet {{tab}} de Llegion",
+  "featuresTitle": "Tout Ollama, au même endroit",
+  "features": [
+    [
+      "Tableau de bord",
+      "État et version du serveur, modèles actifs, VRAM par GPU, CPU et RAM d’un coup d’œil."
+    ],
+    [
+      "Modèles",
+      "Téléchargement avec progression, chargement avec un contexte choisi, déchargement, inspection et suppression."
+    ],
+    [
+      "Discussion",
+      "Réponses Markdown en streaming, tok/s et délai du premier jeton, régénérations côte à côte pour comparer les modèles."
+    ],
+    [
+      "Performances",
+      "Graphiques CPU, RAM, GPU et VRAM en direct, et un benchmark tokens/s basé sur les compteurs d’Ollama."
+    ],
+    [
+      "GPU",
+      "Détecte les GPU NVIDIA, AMD, Intel et Apple. Auto, sélection d’appareils ou CPU seul, option Vulkan."
+    ],
+    [
+      "Journaux",
+      "Flux en direct du serveur géré, de server.log ou de journalctl, avec filtres, recherche et export."
+    ],
+    [
+      "HTTPS + jetons",
+      "Un proxy Ferron supervisé termine le TLS et refuse les requêtes sans jeton Bearer valide. Actif dès le premier lancement."
+    ],
+    [
+      "Répartition de charge",
+      "Répartit les requêtes entre plusieurs machines Ollama, à tour de rôle, derrière les mêmes jetons et une seule adresse."
+    ],
+    [
+      "Lanceur",
+      "Installez et lancez des agents de code avec ollama launch : Claude Code, Codex, OpenCode, Pi et d’autres."
+    ],
+    [
+      "Serveur géré",
+      "Lance ollama serve avec vos réglages, capture ses journaux et le redémarre s’il plante."
+    ]
+  ],
+  "terminalTitle": "Fonctionne aussi en SSH",
+  "terminalText": " apporte les mêmes sept onglets au terminal, sur le même cœur : paramètres, serveur géré, proxy HTTPS, journaux et benchmarks. Pensé pour le clavier, compatible souris, sans bibliothèque graphique.",
+  "terminalKeys": [
+    "changer d’onglet",
+    "démarrer-arrêter / redémarrer le serveur",
+    "activer le proxy HTTPS",
+    "toutes les touches"
+  ],
+  "proxyTitle": "Partagez Ollama en toute sécurité, à la maison ou au bureau",
+  "proxyText": "Ollama n’a pas d’authentification : quiconque atteint son port peut utiliser, télécharger et supprimer vos modèles. Llegion limite Ollama à la boucle locale et supervise un proxy Ferron devant lui : TLS (auto-signé, Let’s Encrypt ou votre propre certificat), jetons Bearer à nommer, copier et révoquer, CORS optionnel, et des jetons générés qui arrivent immédiatement. Si Ferron est installé, il est actif dès le premier lancement.",
+  "balancingText": "Plusieurs machines avec GPU ? Ajoutez-les dans les paramètres et le proxy répartit les requêtes entre elles, à tour de rôle, derrière les mêmes jetons : une seule adresse pour toute la famille ou une petite équipe.",
+  "getTitle": "Obtenir Llegion",
+  "getText": "Archives prêtes à l’emploi pour Linux (x64, arm64, glibc et musl), macOS (.app universelle) et Windows (x64, arm64).",
+  "latest": "Dernière version",
+  "fromSource": "Ou compilez depuis les sources :",
+  "license": "Sous licence MIT",
+  "source": "Code source sur GitHub",
+  "disclaimer": "Llegion est un projet communautaire indépendant, ni affilié à Ollama ni approuvé par Ollama."
+}

@@ -3,8 +3,9 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::app::{AMBER, App, GREEN, RED};
-use crate::config::{ApiToken, LogSource, Settings, TlsMode, service_env_snippet};
+use crate::config::{ApiToken, Backend, LogSource, Settings, TlsMode, service_env_snippet};
 use crate::ferron;
+use crate::i18n::tr;
 use crate::ollama::Client;
 use crate::util::{generate_token, mask_token};
 use crate::views::kit::{self, choice, panel, setting, switch};
@@ -15,16 +16,18 @@ pub enum SettingsPane {
     Server,
     Memory,
     Security,
+    Tokens,
     Logs,
     Application,
 }
 
 impl SettingsPane {
-    const ALL: [SettingsPane; 6] = [
+    const ALL: [SettingsPane; 7] = [
         SettingsPane::Connection,
         SettingsPane::Server,
         SettingsPane::Memory,
         SettingsPane::Security,
+        SettingsPane::Tokens,
         SettingsPane::Logs,
         SettingsPane::Application,
     ];
@@ -35,6 +38,7 @@ impl SettingsPane {
             SettingsPane::Server => ic!(SERVER, "Server"),
             SettingsPane::Memory => ic!(GPU, "Models & memory"),
             SettingsPane::Security => ic!(LOCK, "Security"),
+            SettingsPane::Tokens => ic!(KEY, "API tokens"),
             SettingsPane::Logs => ic!(LOGS, "Logs"),
             SettingsPane::Application => ic!(PALETTE, "Application"),
         }
@@ -42,6 +46,31 @@ impl SettingsPane {
 }
 
 const INPUT_WIDTH: f32 = 380.0;
+
+/// Checks that a load-balanced server answers, as the proxy will call it (no token).
+fn test_backend(ctx: &egui::Context, tests: &BackendTests, url: String) {
+    tests
+        .lock()
+        .unwrap()
+        .insert(url.clone(), (false, "testing…".into()));
+    let (tests, ctx) = (tests.clone(), ctx.clone());
+    std::thread::spawn(move || {
+        let conn = crate::config::Connection {
+            base_url: url.clone(),
+            ..Default::default()
+        };
+        let result = match Client::new(&conn).version() {
+            Ok(v) => (true, trf!("OK — Ollama {version}", version = v)),
+            Err(e) => (false, format!("{e:#}")),
+        };
+        tests.lock().unwrap().insert(url, result);
+        ctx.request_repaint();
+    });
+}
+
+/// Result of the last test of each load-balanced server, by URL.
+pub type BackendTests =
+    std::sync::Arc<std::sync::Mutex<std::collections::HashMap<String, (bool, String)>>>;
 
 fn open_folder(path: &Path) -> std::io::Result<()> {
     std::fs::create_dir_all(path)?;
@@ -115,14 +144,14 @@ impl App {
                 self.draft = self.ctl.settings.clone();
             }
             if dirty {
-                kit::badge(ui, "Unsaved changes", AMBER);
+                kit::badge(ui, tr("Unsaved changes"), AMBER);
             }
         });
     }
 
     pub fn settings_tab(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
-            ui.heading("Settings");
+            ui.heading(tr("Settings"));
             ui.add_space(24.0);
             self.save_buttons(ui);
         });
@@ -139,14 +168,25 @@ impl App {
                 kit::card_frame(ui).inner_margin(10.0).show(ui, |ui| {
                     ui.set_width(ui.available_width());
                     for pane in SettingsPane::ALL {
-                        if kit::nav_item(ui, self.settings_pane == pane, pane.label()).clicked() {
+                        let selected = self.settings_pane == pane;
+                        let item = ui.horizontal(|ui| {
+                            // API tokens is a subsection of Security.
+                            if pane == SettingsPane::Tokens {
+                                ui.add_space(20.0);
+                            }
+                            kit::nav_item(ui, selected, pane.label())
+                        });
+                        if item.inner.clicked() {
                             self.settings_pane = pane;
                         }
                     }
                 });
             });
         egui::CentralPanel::default()
-            .frame(egui::Frame::new())
+            .frame(egui::Frame::new().inner_margin(egui::Margin {
+                left: 16,
+                ..Default::default()
+            }))
             .show(ui, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink(false)
@@ -154,7 +194,8 @@ impl App {
                         SettingsPane::Connection => self.connection_pane(ui),
                         SettingsPane::Server => self.server_pane(ui),
                         SettingsPane::Memory => self.memory_pane(ui),
-                        SettingsPane::Security => self.managed_only(ui, Self::security_pane),
+                        SettingsPane::Security => self.managed_only(ui, Self::proxy_pane),
+                        SettingsPane::Tokens => self.managed_only(ui, Self::tokens_pane),
                         SettingsPane::Logs => self.logs_pane(ui),
                         SettingsPane::Application => self.app_pane(ui),
                     });
@@ -167,7 +208,9 @@ impl App {
         panel(
             ui,
             ic!(CABLE, "Ollama API endpoint"),
-            Some("Point it at a remote proxy URL and token to manage another machine."),
+            Some(tr(
+                "Point it at a remote proxy URL and token to manage another machine.",
+            )),
             |ui| {
                 let c = &mut self.draft.connection;
                 setting(ui, "API URL", None, |ui| {
@@ -175,21 +218,21 @@ impl App {
                 });
                 setting(
                     ui,
-                    "Bearer token",
-                    Some("Only needed through the proxy"),
+                    tr("Bearer token"),
+                    Some(tr("Only needed through the proxy")),
                     |ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut c.api_token)
                                 .password(!self.reveal_tokens)
                                 .desired_width(INPUT_WIDTH.min(ui.available_width() - 100.0)),
                         );
-                        switch(ui, &mut self.reveal_tokens, "Show");
+                        switch(ui, &mut self.reveal_tokens, tr("Show"));
                     },
                 );
                 setting(
                     ui,
-                    "Self-signed certificates",
-                    Some("Accept the proxy's self-signed certificate"),
+                    tr("Self-signed certificates"),
+                    Some(tr("Accept the proxy's self-signed certificate")),
                     |ui| switch(ui, &mut c.accept_invalid_certs, ""),
                 );
             },
@@ -210,7 +253,7 @@ impl App {
                         big_button(ui, ic!(LOCK, "Use the HTTPS proxy"))
                     })
                     .inner
-                    .on_disabled_hover_text("Enable the proxy first");
+                    .on_disabled_hover_text(tr("Enable the proxy first"));
                 if proxy.clicked() {
                     self.draft.connection.base_url = ferron::public_url(&self.draft);
                     self.draft.connection.accept_invalid_certs =
@@ -221,6 +264,7 @@ impl App {
                 }
             });
         });
+        self.backends_pane(ui);
     }
 
     /// Shown on server option panes while the server is not managed by this app.
@@ -244,34 +288,36 @@ impl App {
         panel(
             ui,
             ic!(SERVER, "Process"),
-            Some("Run `ollama serve` from this app, or monitor a server started elsewhere."),
+            Some(tr(
+                "Run `ollama serve` from this app, or monitor a server started elsewhere.",
+            )),
             |ui| {
                 let s = &mut self.draft.server;
                 setting(
                     ui,
-                    "Manage the server",
-                    Some("Quit the tray app / stop the service first"),
+                    tr("Manage the server"),
+                    Some(tr("Quit the tray app / stop the service first")),
                     |ui| switch(ui, &mut s.manage_server, ""),
                 );
                 ui.add_enabled_ui(s.manage_server, |ui| {
                     setting(
                         ui,
-                        "ollama binary",
-                        Some("Name in PATH or full path"),
+                        tr("ollama binary"),
+                        Some(tr("Name in PATH or full path")),
                         |ui| {
                             text(ui, &mut s.ollama_path, "ollama");
                         },
                     );
-                    setting(ui, "Start with the app", None, |ui| {
+                    setting(ui, tr("Start with the app"), None, |ui| {
                         switch(ui, &mut s.auto_start, "")
                     });
-                    setting(ui, "Stop when the app exits", None, |ui| {
+                    setting(ui, tr("Stop when the app exits"), None, |ui| {
                         switch(ui, &mut s.stop_on_exit, "")
                     });
                     setting(
                         ui,
-                        "Restart on crash",
-                        Some("At most 3 times a minute"),
+                        tr("Restart on crash"),
+                        Some(tr("At most 3 times a minute")),
                         |ui| switch(ui, &mut s.restart_on_crash, ""),
                     );
                 });
@@ -281,19 +327,19 @@ impl App {
         panel(ui, ic!(CABLE, "Network binding"), None, |ui| {
             let s = &mut self.draft.server;
             ui.add_enabled_ui(managed, |ui| {
-                setting(ui, "Bind host", Some("OLLAMA_HOST"), |ui| {
+                setting(ui, tr("Bind host"), Some("OLLAMA_HOST"), |ui| {
                     ui.add_enabled(
                         !proxy_enabled,
                         egui::TextEdit::singleline(&mut s.host).desired_width(180.0),
                     );
                     if ui
-                        .selectable_label(s.host == "127.0.0.1", "Local only")
+                        .selectable_label(s.host == "127.0.0.1", tr("Local only"))
                         .clicked()
                     {
                         s.host = "127.0.0.1".into();
                     }
                     if ui
-                        .selectable_label(s.host == "0.0.0.0", "All interfaces")
+                        .selectable_label(s.host == "0.0.0.0", tr("All interfaces"))
                         .clicked()
                     {
                         s.host = "0.0.0.0".into();
@@ -301,16 +347,21 @@ impl App {
                 });
             });
             if managed && proxy_enabled {
-                kit::badge(ui, "Forced to 127.0.0.1 behind the proxy", GREEN);
+                kit::badge(ui, tr("Forced to 127.0.0.1 behind the proxy"), GREEN);
                 ui.add_space(8.0);
             } else if managed && s.host != "127.0.0.1" && s.host != "localhost" {
                 kit::badge(ui, ic!(WARNING, "Exposed without authentication"), AMBER);
                 ui.add_space(8.0);
             }
             ui.add_enabled_ui(managed, |ui| {
-                setting(ui, "Port", Some("Also the HTTPS proxy's upstream"), |ui| {
-                    ui.add(egui::DragValue::new(&mut s.port).range(1..=65535));
-                });
+                setting(
+                    ui,
+                    tr("Port"),
+                    Some(tr("Also the HTTPS proxy's upstream")),
+                    |ui| {
+                        ui.add(egui::DragValue::new(&mut s.port).range(1..=65535));
+                    },
+                );
             });
         });
 
@@ -322,7 +373,7 @@ impl App {
         panel(
             ui,
             ic!(COPY, "System-installed Ollama"),
-            Some("Apply the same settings to the service or tray app:"),
+            Some(tr("Apply the same settings to the service or tray app:")),
             |ui| kit::code_block(ui, &service_env_snippet(&env)),
         );
     }
@@ -331,18 +382,18 @@ impl App {
     fn server_options(&mut self, ui: &mut egui::Ui) {
         panel(ui, ic!(FOLDER, "Paths & access"), None, |ui| {
             let s = &mut self.draft.server;
-            setting(ui, "Models directory", Some("OLLAMA_MODELS"), |ui| {
-                text(ui, &mut s.models_dir, "default (~/.ollama/models)");
+            setting(ui, tr("Models directory"), Some("OLLAMA_MODELS"), |ui| {
+                text(ui, &mut s.models_dir, tr("default (~/.ollama/models)"));
             });
             setting(
                 ui,
-                "Allowed origins",
-                Some("OLLAMA_ORIGINS, comma separated"),
+                tr("Allowed origins"),
+                Some(tr("OLLAMA_ORIGINS, comma separated")),
                 |ui| {
                     text(ui, &mut s.origins, "http://localhost:3000,app://*");
                 },
             );
-            setting(ui, "Debug logging", Some("OLLAMA_DEBUG=1"), |ui| {
+            setting(ui, tr("Debug logging"), Some("OLLAMA_DEBUG=1"), |ui| {
                 switch(ui, &mut s.debug_logging, "")
             });
         });
@@ -350,7 +401,7 @@ impl App {
         panel(
             ui,
             ic!(TERMINAL, "Extra environment"),
-            Some("One KEY=VALUE per line, passed to `ollama serve`."),
+            Some(tr("One KEY=VALUE per line, passed to `ollama serve`.")),
             |ui| {
                 ui.add(
                     egui::TextEdit::multiline(&mut self.draft.server.extra_env)
@@ -379,7 +430,9 @@ impl App {
         panel(
             ui,
             ic!(MODELS, "Context window"),
-            Some("Default for every model (OLLAMA_CONTEXT_LENGTH). Larger needs more VRAM."),
+            Some(tr(
+                "Default for every model (OLLAMA_CONTEXT_LENGTH). Larger needs more VRAM.",
+            )),
             |ui| {
                 ui.horizontal(|ui| {
                     crate::views::models::context_slider(ui, &mut s.context_length);
@@ -390,7 +443,7 @@ impl App {
         panel(ui, ic!(GPU, "Model loading"), None, |ui| {
             setting(
                 ui,
-                "Keep alive",
+                tr("Keep alive"),
                 Some("-1 = forever, 0 = unload now"),
                 |ui| {
                     ui.add(egui::TextEdit::singleline(&mut s.keep_alive).desired_width(80.0));
@@ -406,7 +459,7 @@ impl App {
             );
             setting(
                 ui,
-                "Max loaded models",
+                tr("Max loaded models"),
                 Some("OLLAMA_MAX_LOADED_MODELS"),
                 |ui| {
                     optional_count(ui, &mut s.max_loaded_models, 32, "auto");
@@ -414,13 +467,13 @@ impl App {
             );
             setting(
                 ui,
-                "Parallel requests",
-                Some("OLLAMA_NUM_PARALLEL, per model"),
+                tr("Parallel requests"),
+                Some(tr("OLLAMA_NUM_PARALLEL, per model")),
                 |ui| {
                     optional_count(ui, &mut s.num_parallel, 64, "auto");
                 },
             );
-            setting(ui, "Max queue", Some("OLLAMA_MAX_QUEUE"), |ui| {
+            setting(ui, tr("Max queue"), Some("OLLAMA_MAX_QUEUE"), |ui| {
                 optional_count(ui, &mut s.max_queue, 10_000, "default");
             });
         });
@@ -428,23 +481,23 @@ impl App {
         panel(ui, ic!(CHART, "Performance"), None, |ui| {
             setting(
                 ui,
-                "Flash attention",
-                Some("Less VRAM for long contexts"),
+                tr("Flash attention"),
+                Some(tr("Less VRAM for long contexts")),
                 |ui| switch(ui, &mut s.flash_attention, ""),
             );
             ui.add_enabled_ui(s.flash_attention, |ui| {
                 setting(
                     ui,
-                    "KV cache type",
-                    Some("Requires flash attention"),
+                    tr("KV cache type"),
+                    Some(tr("Requires flash attention")),
                     |ui| {
                         choice(
                             ui,
                             &mut s.kv_cache_type,
                             &[
                                 ("f16".to_string(), "f16"),
-                                ("q8_0".to_string(), "q8_0 · ½"),
-                                ("q4_0".to_string(), "q4_0 · ¼"),
+                                ("q8_0".to_string(), tr("q8_0 · ½")),
+                                ("q4_0".to_string(), tr("q4_0 · ¼")),
                             ],
                         );
                     },
@@ -454,50 +507,141 @@ impl App {
     }
 
     /// HTTPS proxy and the API tokens it checks.
-    fn security_pane(&mut self, ui: &mut egui::Ui) {
-        self.proxy_pane(ui);
-        self.tokens_pane(ui);
+    fn backends_pane(&mut self, ui: &mut egui::Ui) {
+        let p = &mut self.draft.proxy;
+        let new_url = &mut self.new_backend_url;
+        let tests = &self.backend_tests;
+        if !p.enabled {
+            kit::badge(
+                ui,
+                tr("Balanced by the proxy: enable it in Security"),
+                AMBER,
+            );
+            ui.add_space(8.0);
+        } else if !p.load_balancing {
+            kit::badge(
+                ui,
+                tr("Load balancing is off in Security: the proxy ignores these servers"),
+                AMBER,
+            );
+            ui.add_space(8.0);
+        }
+        ui.add_enabled_ui(p.enabled, |ui| {
+            panel(
+                ui,
+                ic!(SERVER, "Load balancing"),
+                Some(tr("The proxy sends requests to this machine's Ollama and the enabled servers below in turn (round robin). Each server needs the models clients ask for, and must accept requests without a token.")),
+                |ui| {
+                    let mut remove = None;
+                    egui::Grid::new("backends")
+                        .striped(true)
+                        .num_columns(3)
+                        .spacing([24.0, 12.0])
+                        .show(ui, |ui| {
+                            for (i, b) in p.backends.iter_mut().enumerate() {
+                                switch(ui, &mut b.enabled, "");
+                                ui.add_sized(
+                                    [320.0, 30.0],
+                                    egui::TextEdit::singleline(&mut b.url),
+                                );
+                                ui.horizontal(|ui| {
+                                    let url = b.url.trim().to_string();
+                                    if ui
+                                        .add_enabled(b.is_valid(), egui::Button::new(ic!(TEST, "Test")))
+                                        .on_hover_text(tr("Calls /api/version on this server, without a token"))
+                                        .clicked()
+                                    {
+                                        test_backend(ui.ctx(), tests, url.clone());
+                                    }
+                                    if ui
+                                        .button(RichText::new(ic!(DELETE, "Remove")).color(RED))
+                                        .clicked()
+                                    {
+                                        remove = Some(i);
+                                    }
+                                    if !b.is_valid() {
+                                        kit::badge(ui, "Needs an http:// or https:// URL", AMBER);
+                                    } else if let Some((ok, msg)) = tests.lock().unwrap().get(&url) {
+                                        kit::badge(ui, msg.clone(), if *ok { GREEN } else { RED });
+                                    }
+                                });
+                                ui.end_row();
+                            }
+                        });
+                    if let Some(i) = remove {
+                        p.backends.remove(i);
+                    }
+                    ui.add_space(10.0);
+                    ui.horizontal(|ui| {
+                        ui.add(
+                            egui::TextEdit::singleline(new_url)
+                                .hint_text("http://192.168.1.20:11434")
+                                .desired_width(300.0),
+                        );
+                        let backend = Backend {
+                            url: new_url.trim().to_string(),
+                            enabled: true,
+                        };
+                        if ui
+                            .add_enabled(backend.is_valid(), egui::Button::new(ic!(ADD, "Add server")))
+                            .clicked()
+                        {
+                            p.backends.push(backend);
+                            new_url.clear();
+                        }
+                    });
+                },
+            );
+        });
     }
 
     fn proxy_pane(&mut self, ui: &mut egui::Ui) {
         panel(
             ui,
             ic!(LOCK, "Ferron reverse proxy"),
-            Some("Adds HTTPS and token checks in front of Ollama, which has no authentication."),
+            Some(tr(
+                "Adds HTTPS and token checks in front of Ollama, which has no authentication.",
+            )),
             |ui| {
                 let p = &mut self.draft.proxy;
-                setting(ui, "Enable the HTTPS proxy", None, |ui| {
+                setting(ui, tr("Enable the HTTPS proxy"), None, |ui| {
                     switch(ui, &mut p.enabled, "")
                 });
                 ui.add_enabled_ui(p.enabled, |ui| {
                     setting(
                         ui,
-                        "ferron binary",
-                        Some("Name in PATH or full path"),
+                        tr("ferron binary"),
+                        Some(tr("Name in PATH or full path")),
                         |ui| {
                             text(ui, &mut p.ferron_path, "ferron");
                             ui.hyperlink_to("Get Ferron", "https://ferron.sh/download");
                         },
                     );
-                    setting(ui, "Start with the app", None, |ui| {
+                    setting(ui, tr("Start with the app"), None, |ui| {
                         switch(ui, &mut p.auto_start, "")
                     });
-                    setting(ui, "Listen address", None, |ui| {
+                    setting(ui, tr("Listen address"), None, |ui| {
                         text(ui, &mut p.listen_host, "0.0.0.0");
                     });
-                    setting(ui, "Port", None, |ui| {
+                    setting(ui, tr("Port"), None, |ui| {
                         ui.add(egui::DragValue::new(&mut p.port).range(1..=65535));
                     });
-                    setting(ui, "Domain / hostname", None, |ui| {
+                    setting(ui, tr("Domain / hostname"), None, |ui| {
                         text(ui, &mut p.domain, "ollama.example.com");
                     });
                     setting(
                         ui,
-                        "CORS origin",
-                        Some("Optional, for browser clients"),
+                        tr("CORS origin"),
+                        Some(tr("Optional, for browser clients")),
                         |ui| {
                             text(ui, &mut p.cors_origin, "https://chat.example.com");
                         },
+                    );
+                    setting(
+                        ui,
+                        tr("Load balancing"),
+                        Some(tr("Round robin with the servers in Connection; off proxies to this machine's Ollama only")),
+                        |ui| switch(ui, &mut p.load_balancing, ""),
                     );
                 });
             },
@@ -512,19 +656,19 @@ impl App {
                     ui,
                     &mut p.tls,
                     &[
-                        (TlsMode::Internal, "Self-signed"),
-                        (TlsMode::Acme, "Let's Encrypt"),
-                        (TlsMode::Custom, "My certificate"),
-                        (TlsMode::Off, "Off (HTTP)"),
+                        (TlsMode::Internal, tr("Self-signed")),
+                        (TlsMode::Acme, tr("Let's Encrypt")),
+                        (TlsMode::Custom, tr("My certificate")),
+                        (TlsMode::Off, tr("Off (HTTP)")),
                     ],
                 );
                 ui.add_space(10.0);
                 match p.tls {
                     TlsMode::Internal => {
                         ui.label(
-                            RichText::new(format!(
-                                "Trust {} on clients, or accept the certificate.",
-                                self_signed.display()
+                            RichText::new(trf!(
+                                "Trust {path} on clients, or accept the certificate.",
+                                path = self_signed.display()
                             ))
                             .weak(),
                         );
@@ -532,18 +676,18 @@ impl App {
                     TlsMode::Acme => {
                         setting(
                             ui,
-                            "ACME e-mail",
-                            Some("Needs public DNS and ports 80/443"),
+                            tr("ACME e-mail"),
+                            Some(tr("Needs public DNS and ports 80/443")),
                             |ui| {
                                 text(ui, &mut p.acme_email, "you@example.com");
                             },
                         );
                     }
                     TlsMode::Custom => {
-                        setting(ui, "Certificate (PEM)", None, |ui| {
+                        setting(ui, tr("Certificate (PEM)"), None, |ui| {
                             text(ui, &mut p.cert_path, "/path/to/fullchain.pem");
                         });
-                        setting(ui, "Private key (PEM)", None, |ui| {
+                        setting(ui, tr("Private key (PEM)"), None, |ui| {
                             text(ui, &mut p.key_path, "/path/to/privkey.pem");
                         });
                     }
@@ -564,15 +708,15 @@ impl App {
         if enabled {
             let url = ferron::public_url(&self.draft);
             panel(ui, ic!(TEST, "Status & test"), None, |ui| {
-                setting(ui, "Public URL", None, |ui| {
+                setting(ui, tr("Public URL"), None, |ui| {
                     ui.label(RichText::new(&url).monospace().strong());
-                    if ui.button(icon!(COPY)).on_hover_text("Copy").clicked() {
+                    if ui.button(icon!(COPY)).on_hover_text(tr("Copy")).clicked() {
                         ui.ctx().copy_text(url.clone());
                     }
                 });
                 self.proxy_test_ui(ui, &url);
                 ui.add_space(10.0);
-                ui.label(RichText::new("Client example").strong());
+                ui.label(RichText::new(tr("Client example")).strong());
                 let token = self
                     .draft
                     .proxy
@@ -596,7 +740,10 @@ impl App {
             panel(
                 ui,
                 ic!(LOGS, "Generated Ferron configuration"),
-                Some(&format!("Written to {}", ferron::config_path().display())),
+                Some(&trf!(
+                    "Written to {path}",
+                    path = ferron::config_path().display()
+                )),
                 |ui| {
                     let mut content = ferron::generate(&self.draft);
                     if !self.reveal_tokens {
@@ -616,7 +763,9 @@ impl App {
         ui.horizontal(|ui| {
             if ui
                 .button(ic!(TEST, "Test proxy"))
-                .on_hover_text("Calls /api/version through the proxy with the first token")
+                .on_hover_text(tr(
+                    "Calls /api/version through the proxy with the first token",
+                ))
                 .clicked()
             {
                 let conn = crate::config::Connection {
@@ -637,7 +786,10 @@ impl App {
                 std::thread::spawn(move || {
                     let res = Client::new(&conn).version();
                     *slot.lock().unwrap() = Some(match res {
-                        Ok(v) => (true, format!("OK — Ollama {v} reachable with token")),
+                        Ok(v) => (
+                            true,
+                            trf!("OK — Ollama {version} reachable with token", version = v),
+                        ),
                         Err(e) => (false, format!("{e:#}")),
                     });
                     ctx.request_repaint();
@@ -649,8 +801,10 @@ impl App {
         });
         if self.draft_dirty() {
             ui.label(
-                RichText::new("The test uses saved settings; save first to test your changes.")
-                    .weak(),
+                RichText::new(tr(
+                    "The test uses saved settings; save first to test your changes.",
+                ))
+                .weak(),
             );
         }
     }
@@ -659,16 +813,18 @@ impl App {
         panel(
             ui,
             ic!(KEY, "Token authentication"),
-            Some("Clients send `Authorization: Bearer <token>` to the HTTPS proxy."),
+            Some(tr(
+                "Clients send `Authorization: Bearer <token>` to the HTTPS proxy.",
+            )),
             |ui| {
                 let p = &mut self.draft.proxy;
-                setting(ui, "Require an API token", None, |ui| {
+                setting(ui, tr("Require an API token"), None, |ui| {
                     switch(ui, &mut p.require_token, "")
                 });
                 if !p.enabled {
                     kit::badge(
                         ui,
-                        "The HTTPS proxy is disabled — tokens are not enforced",
+                        tr("The HTTPS proxy is disabled — tokens are not enforced"),
                         AMBER,
                     );
                 }
@@ -681,14 +837,18 @@ impl App {
         ui.add_enabled_ui(require, |ui| {
             kit::panel_with_actions(
                 ui,
-                &format!("Tokens ({})", self.draft.proxy.tokens.len()),
+                &trf!("Tokens ({count})", count = self.draft.proxy.tokens.len()),
                 |ui| {
-                    switch(ui, &mut reveal, "Reveal");
+                    switch(ui, &mut reveal, tr("Reveal"));
                 },
                 |ui| {
                     let p = &mut self.draft.proxy;
                     if p.tokens.is_empty() {
-                        kit::badge(ui, "No token yet: every request will be rejected", AMBER);
+                        kit::badge(
+                            ui,
+                            tr("No token yet: every request will be rejected"),
+                            AMBER,
+                        );
                         ui.add_space(8.0);
                     }
                     let mut remove = None;
@@ -714,7 +874,7 @@ impl App {
                                     }
                                     if ui
                                         .button(icon!(REGENERATE))
-                                        .on_hover_text("Regenerate")
+                                        .on_hover_text(tr("Regenerate"))
                                         .clicked()
                                     {
                                         t.token = generate_token();
@@ -736,12 +896,12 @@ impl App {
                     ui.horizontal(|ui| {
                         ui.add(
                             egui::TextEdit::singleline(&mut self.new_token_label)
-                                .hint_text("Label, e.g. laptop or open-webui")
+                                .hint_text(tr("Label, e.g. laptop or open-webui"))
                                 .desired_width(300.0),
                         );
                         if ui.button(ic!(ADD, "Generate token")).clicked() {
                             let label = if self.new_token_label.trim().is_empty() {
-                                format!("token {}", p.tokens.len() + 1)
+                                trf!("token {n}", n = p.tokens.len() + 1)
                             } else {
                                 self.new_token_label.trim().to_string()
                             };
@@ -763,29 +923,36 @@ impl App {
         panel(
             ui,
             ic!(LOGS, "Log source"),
-            Some("Where the Logs tab reads Ollama's output."),
+            Some(tr("Where the Logs tab reads Ollama's output.")),
             |ui| {
                 choice(
                     ui,
                     &mut l.source,
                     &[
-                        (LogSource::Managed, "Managed server"),
-                        (LogSource::File, "Log file"),
-                        (LogSource::Journal, "systemd journal"),
+                        (LogSource::Managed, tr("Managed server")),
+                        (LogSource::File, tr("Log file")),
+                        (LogSource::Journal, tr("systemd journal")),
                     ],
                 );
                 ui.add_space(10.0);
                 match l.source {
                     LogSource::Managed => {
-                        ui.label(RichText::new("Output of the server started by this app.").weak());
+                        ui.label(
+                            RichText::new(tr("Output of the server started by this app.")).weak(),
+                        );
                     }
                     LogSource::File => {
-                        setting(ui, "Log file", Some("server.log of the tray app"), |ui| {
-                            text(ui, &mut l.file_path, "server.log path");
-                        });
+                        setting(
+                            ui,
+                            tr("Log file"),
+                            Some(tr("server.log of the tray app")),
+                            |ui| {
+                                text(ui, &mut l.file_path, tr("server.log path"));
+                            },
+                        );
                     }
                     LogSource::Journal => {
-                        setting(ui, "systemd unit", None, |ui| {
+                        setting(ui, tr("systemd unit"), None, |ui| {
                             text(ui, &mut l.journal_unit, "ollama");
                         });
                     }
@@ -793,7 +960,7 @@ impl App {
             },
         );
         panel(ui, ic!(TUNE, "Buffer"), None, |ui| {
-            setting(ui, "Lines kept in memory", None, |ui| {
+            setting(ui, tr("Lines kept in memory"), None, |ui| {
                 ui.add(
                     egui::DragValue::new(&mut l.max_lines)
                         .range(500..=500_000)
@@ -807,8 +974,8 @@ impl App {
         panel(ui, ic!(PALETTE, "Appearance"), None, |ui| {
             setting(
                 ui,
-                "Interface scale",
-                Some("Ctrl + / Ctrl − also zoom"),
+                tr("Interface scale"),
+                Some(tr("Ctrl + / Ctrl − also zoom")),
                 |ui| {
                     ui.add(
                         egui::Slider::new(&mut self.draft.ui.scale, 0.75..=2.5)
@@ -817,7 +984,7 @@ impl App {
                     );
                 },
             );
-            setting(ui, "Presets", None, |ui| {
+            setting(ui, tr("Presets"), None, |ui| {
                 for preset in [1.0, 1.25, 1.5, 1.75, 2.0] {
                     if ui
                         .selectable_label(
@@ -830,7 +997,40 @@ impl App {
                     }
                 }
             });
-            setting(ui, "Theme", None, |ui| {
+            setting(ui, tr("Language"), None, |ui| {
+                let current = self.ctl.settings.ui.language.clone();
+                let name = |code: &str| {
+                    crate::i18n::LANGUAGES
+                        .iter()
+                        .find(|(c, _)| *c == code)
+                        .map_or("", |(_, name)| *name)
+                };
+                let system = trf!(
+                    "System ({language})",
+                    language = name(crate::i18n::system_language())
+                );
+                let mut picked = current.clone();
+                egui::ComboBox::from_id_salt("language")
+                    .selected_text(if current.is_empty() {
+                        system.clone()
+                    } else {
+                        name(&current).to_string()
+                    })
+                    .show_ui(ui, |ui| {
+                        ui.selectable_value(&mut picked, String::new(), system);
+                        for (code, native) in crate::i18n::LANGUAGES {
+                            ui.selectable_value(&mut picked, code.to_string(), native);
+                        }
+                    });
+                if picked != current {
+                    // Applied immediately, like the theme.
+                    self.ctl.settings.ui.language = picked.clone();
+                    self.draft.ui.language = picked;
+                    crate::i18n::set_language(&self.ctl.settings.ui.language);
+                    let _ = self.ctl.settings.save();
+                }
+            });
+            setting(ui, tr("Theme"), None, |ui| {
                 let mut dark = self.ctl.settings.ui.dark_mode;
                 choice(
                     ui,
@@ -851,8 +1051,8 @@ impl App {
             let u = &mut self.draft.ui;
             setting(
                 ui,
-                "Refresh interval",
-                Some("How often the API and metrics are polled"),
+                tr("Refresh interval"),
+                Some(tr("How often the API and metrics are polled")),
                 |ui| {
                     ui.add(
                         egui::DragValue::new(&mut u.poll_interval_ms)
@@ -861,7 +1061,7 @@ impl App {
                     );
                 },
             );
-            setting(ui, "Chart history", None, |ui| {
+            setting(ui, tr("Chart history"), None, |ui| {
                 ui.add(
                     egui::DragValue::new(&mut u.history_seconds)
                         .range(30..=3600)
@@ -871,7 +1071,7 @@ impl App {
         });
 
         panel(ui, ic!(FOLDER, "Configuration files"), None, |ui| {
-            setting(ui, "Configuration folder", None, |ui| {
+            setting(ui, tr("Configuration folder"), None, |ui| {
                 ui.add(
                     egui::Label::new(
                         RichText::new(crate::config::config_dir().display().to_string())
@@ -879,7 +1079,7 @@ impl App {
                     )
                     .wrap(),
                 );
-                if ui.button("Open").clicked()
+                if ui.button(tr("Open")).clicked()
                     && let Err(e) = open_folder(&crate::config::config_dir())
                 {
                     self.ctl
@@ -887,14 +1087,14 @@ impl App {
                         .app_error(format!("Failed to open configuration folder: {e}"));
                 }
             });
-            setting(ui, "Data folder", None, |ui| {
+            setting(ui, tr("Data folder"), None, |ui| {
                 ui.add(
                     egui::Label::new(
                         RichText::new(crate::config::data_dir().display().to_string()).monospace(),
                     )
                     .wrap(),
                 );
-                if ui.button("Open").clicked()
+                if ui.button(tr("Open")).clicked()
                     && let Err(e) = open_folder(&crate::config::data_dir())
                 {
                     self.ctl
@@ -904,19 +1104,22 @@ impl App {
             });
             setting(
                 ui,
-                "Reset",
-                Some("Restores every default, including API tokens"),
+                tr("Reset"),
+                Some(tr("Restores every default, including API tokens")),
                 |ui| {
                     if !self.confirm_reset {
                         if ui.button(ic!(UNDO, "Reset all settings")).clicked() {
                             self.confirm_reset = true;
                         }
                     } else {
-                        if ui.button(RichText::new("Yes, reset").color(RED)).clicked() {
+                        if ui
+                            .button(RichText::new(tr("Yes, reset")).color(RED))
+                            .clicked()
+                        {
                             self.draft = Settings::default();
                             self.confirm_reset = false;
                         }
-                        if ui.button("Cancel").clicked() {
+                        if ui.button(tr("Cancel")).clicked() {
                             self.confirm_reset = false;
                         }
                     }
